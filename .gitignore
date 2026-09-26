@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# WXT / build
+extension/.output/
+extension/.wxt/
+*.zip
+
+# Local downloads (large binaries + signed URLs)
+downloads/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>豆包下载</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="header">
+        <div class="brand-row">
+          <div class="mark" aria-hidden="true">
+            <span class="mark-dot"></span>
+          </div>
+          <div>
+            <div class="brand">豆包下载</div>
+            <div class="sub">当前会话 · 最清晰 · ZIP</div>
+          </div>
+        </div>
+        <div class="header-glow" aria-hidden="true"></div>
+      </header>
+
+      <main class="main">
+        <section class="card">
+          <label class="field">
+            <span class="label">文件名前缀</span>
+            <input
+              id="prefix"
+              type="text"
+              maxlength="64"
+              placeholder="例如 0001"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+          <div id="preview" class="preview">
+            <span class="preview-k">输出</span>
+            <span class="preview-v">0001-共N张.zip → 0001/0001-01.png …</span>
+          </div>
+        </section>
+
+        <button id="run" class="btn" type="button">
+          <span class="btn-icon" aria-hidden="true">⬇</span>
+          <span>打包下载</span>
+        </button>
+
+        <section class="progress-card" id="progress-card" hidden>
+          <div class="progress-top">
+            <span id="phase" class="phase">—</span>
+            <span id="progress-meta" class="progress-meta"></span>
+          </div>
+          <div class="bar" aria-hidden="true">
+            <div id="bar-fill" class="bar-fill" style="width: 0%"></div>
+          </div>
+          <p id="progress-msg" class="progress-msg">—</p>
+          <div class="stats" id="stats">
+            <div class="stat">
+              <span class="stat-k">会话</span>
+              <span class="stat-v" id="stat-chat">—</span>
+            </div>
+            <div class="stat">
+              <span class="stat-k">找到</span>
+              <span class="stat-v" id="stat-found">—</span>
+            </div>
+            <div class="stat">
+              <span class="stat-k">进度</span>
+              <span class="stat-v" id="stat-pct">—</span>
+            </div>
+          </div>
+        </section>
+
+        <p id="status" class="status">
+          打开豆包对话，填前缀后点「打包下载」。
+        </p>
+
+        <button id="copy-console" class="btn-fallback" type="button">
+          复制 Console 兜底脚本
+        </button>
+
+        <section class="log-wrap">
+          <div class="log-head">
+            <span class="log-title">
+              <span class="log-live" aria-hidden="true"></span>
+              运行日志
+            </span>
+            <button id="clear-log" class="linkish" type="button">清空</button>
+          </div>
+          <pre id="log" class="log">就绪</pre>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

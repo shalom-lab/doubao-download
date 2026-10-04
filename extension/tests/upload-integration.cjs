@@ -64,11 +64,11 @@ const background = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
      const initial={doubao_github_settings:{repo:'test/prompts',token:'fake-test-token',branch:''},'doubao_content_draft:/chat/123':{contents:'  中文正文\\n第二行  ',reply_words:'  回复词  ',images:[{id:'b',url:'https://test.byteimg.com/b.png',name:'b.png'},{id:'a',url:'https://test.byteimg.com/a.png',name:'a.png'}],scanned:true}};
      let store=JSON.parse(localStorage.getItem('mockStore')||'null')||initial;
      const storage={get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(k=>[k,store[k]])),set:async data=>{const changes={};for(const k in data)changes[k]={oldValue:store[k],newValue:data[k]};Object.assign(store,data);localStorage.setItem('mockStore',JSON.stringify(store));listeners.forEach(fn=>fn(changes,'local'));},setAccessLevel:async()=>{}};
-     window.chrome={storage:{local:storage,onChanged:{addListener:fn=>listeners.push(fn)}},tabs:{query:async()=>[{id:1,url:'https://www.doubao.com/chat/123'}]},runtime:{id:'test',getURL:p=>location.origin+p,onMessage:{addListener:fn=>window.receiver=fn},onStartup:{addListener:()=>{}},onInstalled:{addListener:()=>{}},sendMessage:message=>new Promise(resolve=>window.receiver(message,{id:'test',url:location.origin+'/popup.html'},resolve))},alarms:{get:async()=>({}),create:async()=>{},onAlarm:{addListener:fn=>window.alarm=fn}},action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}}};
+     window.chrome={storage:{local:storage,onChanged:{addListener:fn=>listeners.push(fn)}},tabs:{query:async()=>[{id:1,url:'https://www.doubao.com/chat/123'}]},runtime:{id:'test',getURL:p=>location.origin+p,onMessage:{addListener:fn=>window.receiver=fn},onStartup:{addListener:()=>{}},onInstalled:{addListener:()=>{}},sendMessage:message=>new Promise(resolve=>window.receiver(message,{id:'test',url:location.origin+'/sidepanel.html'},resolve))},alarms:{get:async()=>({}),create:async()=>{},onAlarm:{addListener:fn=>window.alarm=fn}},action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}},sidePanel:{setPanelBehavior:async()=>{}}};
      Object.defineProperty(navigator,'clipboard',{value:{readText:async()=>''}});
      ${background}
    ` });
-   const url = `http://127.0.0.1:${server.address().port}/popup.html`;
+   const url = `http://127.0.0.1:${server.address().port}/sidepanel.html`;
    await page.goto(url);
    await page.locator('[data-tab="compose"]').click();
    await page.waitForFunction(() => document.querySelectorAll('.image-card').length === 2);

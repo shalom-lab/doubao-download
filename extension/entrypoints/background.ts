@@ -1,19 +1,31 @@
 import { BASE_PATH, CATEGORY, GithubError, makeMarkdown, makeRecord, putGithubFile, resolveBranch, validateInput, validateSettings, type GithubSettings, type UploadInput } from "../utils/github-upload";
 import { fetchPreparedImage } from "../utils/prepare-image";
-import { deleteFile, getFile, listJobs, saveFile, saveJob, type UploadJob } from "../utils/upload-store";
+import { deleteFile, deleteJob, getFile, listJobs, saveFile, saveJob, type UploadJob } from "../utils/upload-store";
 
 export default defineBackground(() => {
   let processing = false;
   let mutations = Promise.resolve();
   const alarmName = "doubao-upload-retry";
+  const KEEP_DONE = 10;
 
   async function publish() {
-    const jobs = await listJobs();
-    let completed = 0;
-    const summaries = jobs.sort((a, b) => b.savedAt.localeCompare(a.savedAt)).filter((job) => job.status !== "done" || completed++ < 10).map(({ id, repo, branch, status, message, files }) => ({
-      id, repo, branch, status, message, done: files.filter((f) => f.uploaded).length, total: files.length,
-      url: status === "done" ? `https://github.com/${repo}/blob/${encodeURIComponent(branch)}/${BASE_PATH}/${CATEGORY}/${id}.md` : "",
-    }));
+    let jobs = await listJobs();
+    const extraDone = jobs.filter((job) => job.status === "done").sort((a, b) => b.savedAt.localeCompare(a.savedAt)).slice(KEEP_DONE);
+    for (const job of extraDone) {
+      for (const file of job.files) await deleteFile(file.key).catch(() => {});
+      await deleteJob(job.id);
+    }
+    if (extraDone.length) jobs = await listJobs();
+    const summaries = jobs.sort((a, b) => b.savedAt.localeCompare(a.savedAt)).map((job) => {
+      const imageTotal = job.input.images.length;
+      const imageDone = job.files.filter((file) => file.key.includes(":image:") && file.uploaded).length;
+      return {
+        id: job.id, repo: job.repo, branch: job.branch, status: job.status, message: job.message,
+        done: job.status === "done" ? imageTotal : imageDone,
+        total: imageTotal,
+        url: job.status === "done" ? `https://github.com/${job.repo}/blob/${encodeURIComponent(job.branch)}/${BASE_PATH}/${CATEGORY}/${job.id}.md` : "",
+      };
+    });
     await browser.storage.local.set({ doubao_upload_status: summaries });
     const pending = jobs.filter((job) => job.status !== "done");
     await browser.action.setBadgeText({ text: pending.length ? String(pending.length) : "" });
@@ -67,17 +79,21 @@ export default defineBackground(() => {
         await saveJob(job); // Pin default branch before the first file write.
       }
       // Keep writes sequential: concurrent Contents API writes may conflict.
+      const imageTotal = job.input.images.length;
       for (const file of job.files) {
         if (file.uploaded) continue;
         const blob = await getFile(file.key);
         if (!blob) throw new GithubError("本地图片缓存缺失，请重新采集后提交", false);
-        await persist(job, `上传 ${job.files.filter((f) => f.uploaded).length + 1}/${job.files.length}：${file.path.split("/").pop()}`);
+        const isImage = file.key.includes(":image:");
+        await persist(job, isImage
+          ? `上传图片 ${job.files.filter((row) => row.key.includes(":image:") && row.uploaded).length + 1}/${imageTotal}`
+          : `上传 ${file.path.split("/").pop()}`);
         await putGithubFile(settings, job.branch, file.path, blob);
         file.uploaded = true;
         await saveJob(job);
       }
       job.status = "done";
-      await persist(job, `上传完成：${job.input.images.length} 张图片及 JSON / Markdown`);
+      await persist(job, imageTotal ? "上传完成" : "上传完成（无图片）");
       for (const file of job.files) await deleteFile(file.key).catch(() => {});
     } catch (error) {
       const retryable = !(error instanceof GithubError) || error.retryable;
@@ -122,7 +138,7 @@ export default defineBackground(() => {
     return { id, existing: false, status: job.status };
   }
   browser.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== browser.runtime.id || sender.url?.split("?")[0] !== browser.runtime.getURL("/popup.html")) return;
+    if (sender.id !== browser.runtime.id || sender.url?.split("?")[0] !== browser.runtime.getURL("/sidepanel.html")) return;
     if (!message || !["upload:enqueue", "upload:retry"].includes(message.type)) return;
     // Serialize enqueue operations to prevent double-clicks creating duplicate jobs.
     mutations = mutations.catch(() => {}).then(async () => {
@@ -148,6 +164,7 @@ export default defineBackground(() => {
   browser.alarms.onAlarm.addListener((alarm) => { if (alarm.name === alarmName) kick(); });
   browser.runtime.onStartup.addListener(() => { void ensureAlarm().then(kick); });
   browser.runtime.onInstalled.addListener(() => { void ensureAlarm().then(kick); });
+  void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   // Restrict credentials to extension pages and the service worker.
   void browser.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
   void ensureAlarm().then(kick);

@@ -98,6 +98,7 @@ export async function downloadImagesAsZip(options: {
   });
 
   const zip = new JSZip();
+  // Keep ZIP membership in the caller’s item order (fetch is parallel).
   for (const row of okList) {
     if (!row.ok) continue;
     zip.file(`${folderInsideZip}/${row.item.name}`, row.data);

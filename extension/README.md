@@ -1,6 +1,6 @@
 # 豆包下载（WXT）
 
-正式交付为 **popup 模式**（点击扩展图标打开面板）。说明见 [../README.md](../README.md)。
+正式交付为 **侧边栏**（点击扩展图标打开 Chrome Side Panel）。说明见 [../README.md](../README.md)。
 
 ```bash
 npm install

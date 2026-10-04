@@ -29,6 +29,7 @@ async function operation<T>(store: string, mode: IDBTransactionMode, fn: (store:
 }
 export const listJobs = () => operation("jobs", "readonly", (s) => s.getAll()) as Promise<UploadJob[]>;
 export const saveJob = (job: UploadJob) => operation("jobs", "readwrite", (s) => s.put(job));
+export const deleteJob = (id: string) => operation("jobs", "readwrite", (s) => s.delete(id));
 export const getFile = (key: string) => operation("files", "readonly", (s) => s.get(key)) as Promise<Blob | undefined>;
 export const saveFile = (key: string, blob: Blob) => operation("files", "readwrite", (s) => s.put(blob, key));
 export const deleteFile = (key: string) => operation("files", "readwrite", (s) => s.delete(key));

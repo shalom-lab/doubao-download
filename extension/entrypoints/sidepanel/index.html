@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>豆包下载</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav class="tabs" aria-label="功能切换">
+        <button type="button" data-tab="download" aria-pressed="true" aria-label="图片下载" title="图片下载">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4" /></svg>
+        </button>
+        <button type="button" data-tab="compose" aria-pressed="false" aria-label="内容发布" title="内容发布">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-5 5 5-5 5 5M5 16v4h14v-4" /></svg>
+        </button>
+        <button type="button" data-tab="settings" aria-pressed="false" aria-label="GitHub 设置" title="GitHub 设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-.5 2.2-1.7 1-2.2-.7-3 5.2L3.3 12l-1.7 1.3 3 5.2 2.2-.7 1.7 1L9 21h6l.5-2.2 1.7-1 2.2.7 3-5.2-1.7-1.3 1.7-1.3-3-5.2-2.2.7-1.7-1L15 3Z" /><circle cx="12" cy="12" r="3" /></svg>
+        </button>
+      </nav>
+      <label class="jpeg-option"><input id="convert-jpeg" type="checkbox" checked /> 大于 2MB 的图片转为 JPEG（下载 / 上传）</label>
+      <main class="main" id="panel-download">
+        <section class="card">
+          <label class="field">
+            <span class="label">文件名前缀</span>
+            <input
+              id="prefix"
+              type="text"
+              maxlength="64"
+              placeholder="例如 0001"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+          <div id="preview" class="preview">
+            <span class="preview-k">输出</span>
+            <span class="preview-v">0001-共N张.zip → 0001/0001-01.png …</span>
+          </div>
+        </section>
+
+        <div class="image-heading">
+          <strong>对话图片 <span id="download-image-count">0</span></strong>
+          <div class="image-actions">
+            <button type="button" id="download-select-all" class="btn-mini">全选</button>
+            <button type="button" id="download-select-none" class="btn-mini">全不选</button>
+            <button type="button" id="scan-download-images" class="btn-mini">获取图片</button>
+          </div>
+        </div>
+        <p class="hint">点图片主体即可勾选；悬停后左下角可放大。可拖拽排序，勾选的会按此顺序打包。</p>
+        <div id="download-image-list" class="image-list"></div>
+
+        <button id="run" class="btn" type="button">
+          <span class="btn-icon" aria-hidden="true">⬇</span>
+          <span>打包下载</span>
+        </button>
+
+        <section class="progress-card" id="progress-card" hidden>
+          <div class="progress-top">
+            <span id="phase" class="phase">—</span>
+            <span id="progress-meta" class="progress-meta"></span>
+          </div>
+          <div class="bar" aria-hidden="true">
+            <div id="bar-fill" class="bar-fill" style="width: 0%"></div>
+          </div>
+          <p id="progress-msg" class="progress-msg">—</p>
+          <div class="stats" id="stats">
+            <div class="stat">
+              <span class="stat-k">会话</span>
+              <span class="stat-v" id="stat-chat">—</span>
+            </div>
+            <div class="stat">
+              <span class="stat-k">找到</span>
+              <span class="stat-v" id="stat-found">—</span>
+            </div>
+            <div class="stat">
+              <span class="stat-k">进度</span>
+              <span class="stat-v" id="stat-pct">—</span>
+            </div>
+          </div>
+        </section>
+
+        <p id="status" class="status">
+          打开豆包对话，勾选并排好顺序后点「打包下载」。
+        </p>
+
+        <button id="copy-console" class="btn-fallback" type="button">
+          复制 Console 兜底脚本
+        </button>
+
+        <section class="log-wrap">
+          <div class="log-head">
+            <span class="log-title">
+              <span class="log-live" aria-hidden="true"></span>
+              运行日志
+            </span>
+            <button id="clear-log" class="linkish" type="button">清空</button>
+          </div>
+          <pre id="log" class="log">就绪</pre>
+        </section>
+      </main>
+      <section class="main" id="panel-compose" hidden aria-label="内容编辑">
+        <label class="field" for="contents"><span class="label">contents</span></label>
+        <textarea id="contents" name="contents" rows="6" placeholder="自动读取剪贴板，也可以手动粘贴和修改"></textarea>
+        <button type="button" id="read-clipboard" class="btn btn-ghost">读取剪贴板</button>
+        <label class="field" for="reply_words"><span class="label">reply_words</span></label>
+        <input type="text" id="reply_words" name="reply_words" placeholder="输入或粘贴回复内容" />
+        <div class="image-heading">
+          <strong>对话图片 <span id="image-count">0</span></strong>
+          <div class="image-actions">
+            <button type="button" id="compose-select-all" class="btn-mini">全选</button>
+            <button type="button" id="compose-select-none" class="btn-mini">全不选</button>
+            <button type="button" id="scan-images" class="btn-mini">获取图片</button>
+          </div>
+        </div>
+        <p class="hint">点图片主体即可勾选；悬停后左下角可放大。可拖拽排序，勾选的会上传。</p>
+        <div id="image-list" class="image-list"></div>
+        <button type="button" id="submit-content" class="btn">提交到 GitHub</button>
+        <p class="hint">先保存本地任务，再后台缓存图片并上传到 infoflow-data/Prompts/。无需等待上传完成。</p>
+        <p id="compose-status" class="status" role="status">内容和图片顺序会自动保存。</p>
+        <section class="card"><strong>上传任务</strong><div id="upload-jobs" aria-live="polite"><p class="hint">暂无上传任务</p></div></section>
+      </section>
+      <section class="main" id="panel-settings" hidden aria-label="GitHub 设置">
+        <form id="github-form" class="card">
+          <label class="field"><span class="label">GitHub Repo</span><input id="github-repo" type="text" placeholder="owner/repo 或 GitHub 仓库链接" required /></label>
+          <label class="field"><span class="label">分支（可选）</span><input id="github-branch" type="text" placeholder="留空使用仓库默认分支" autocomplete="off" /></label>
+          <label class="field"><span class="label">GitHub Token</span><input id="github-token" type="password" placeholder="输入 GitHub Token" autocomplete="off" spellcheck="false" /></label>
+          <p class="hint">配置仅保存在此浏览器本地。留空 Token 后保存可清除已存 Token。</p>
+          <p class="hint">Token 需要目标仓库的 Contents 读写权限。数据目录固定为 infoflow-data。</p>
+          <button class="btn" type="submit">保存设置</button>
+        </form>
+        <p id="settings-status" class="status" role="status">填写后保存，供后续提交使用。</p>
+      </section>
+    </div>
+    <dialog id="image-preview" aria-label="图片预览">
+      <div class="dialog-heading"><strong id="preview-title">图片预览</strong><button type="button" id="close-preview" aria-label="关闭预览">×</button></div>
+      <p id="preview-loading" class="hint" role="status">图片加载中…</p>
+      <img id="preview-image" alt="图片预览" referrerpolicy="no-referrer" />
+    </dialog>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

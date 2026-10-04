@@ -1,6 +1,6 @@
 /**
  * 注入到豆包页面 MAIN world 的脚本（可访问页面 React Fiber）。
- * 由 popup 通过 chrome.scripting.executeScript({ world: 'MAIN' }) 加载。
+ * 由侧边栏通过 chrome.scripting.executeScript({ world: 'MAIN' }) 加载。
  */
 import {
   extractHdImages,
@@ -45,14 +45,22 @@ export type DoubaoHdApi = {
   logs: string[];
   progress: DoubaoHdProgress;
   running: boolean;
-  /** 后台任务结果（供 popup 轮询，避免 executeScript 堵死） */
+  /** 后台任务结果（供侧边栏轮询，避免 executeScript 堵死） */
   jobResult:
     | { ok: true; data: DoubaoHdRunResult }
     | { ok: false; error: string }
     | null;
   /** 启动打包（立即返回，结果写入 jobResult） */
-  startRun: (opts: { prefix: string; convertToJpeg?: boolean }) => boolean;
-  run: (opts: { prefix: string; convertToJpeg?: boolean }) => Promise<DoubaoHdRunResult>;
+  startRun: (opts: {
+    prefix: string;
+    convertToJpeg?: boolean;
+    items?: { id?: string; url: string }[];
+  }) => boolean;
+  run: (opts: {
+    prefix: string;
+    convertToJpeg?: boolean;
+    items?: { id?: string; url: string }[];
+  }) => Promise<DoubaoHdRunResult>;
 };
 
 declare global {
@@ -108,26 +116,49 @@ export default defineUnlistedScript(() => {
       try {
         const prefix = sanitizePrefix(opts.prefix || "0001");
         const chatId = getCurrentChatId();
-        setProgress({
-          phase: "scan",
-          message: "正在查找当前会话图片…",
-          chatId,
-          found: 0,
-          percent: 8,
-        });
-        pushLog(
-          `开始打包… prefix=${prefix} chatId=${chatId || "?"}（仅当前会话·最清晰）`
-        );
-
-        const items = await extractHdImages(prefix, (t) => {
+        const numbered = (list: { id?: string; url: string }[]) =>
+          list.map((item, index) => ({
+            index: index + 1,
+            id: item.id || String(index + 1),
+            url: item.url,
+            name: `${prefix}-${String(index + 1).padStart(2, "0")}.png`,
+          }));
+        let items;
+        if (opts.items?.length) {
+          items = numbered(opts.items);
           setProgress({
             phase: "scan",
-            message: t.message,
+            message: `按已选 ${items.length} 张的顺序打包…`,
             chatId,
-            found: t.found,
-            percent: Math.min(40, t.percent),
+            found: items.length,
+            percent: 12,
           });
-        });
+          pushLog(
+            `开始打包… prefix=${prefix} chatId=${chatId || "?"} 已选 ${items.length} 张（按列表顺序）`
+          );
+        } else {
+          setProgress({
+            phase: "scan",
+            message: "正在查找当前会话图片…",
+            chatId,
+            found: 0,
+            percent: 8,
+          });
+          pushLog(
+            `开始打包… prefix=${prefix} chatId=${chatId || "?"}（仅当前会话·最清晰）`
+          );
+          items = numbered(
+            await extractHdImages(prefix, (t) => {
+              setProgress({
+                phase: "scan",
+                message: t.message,
+                chatId,
+                found: t.found,
+                percent: Math.min(40, t.percent),
+              });
+            })
+          );
+        }
         if (!items.length) {
           setProgress({
             phase: "error",

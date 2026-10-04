@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import type { HdImageItem } from "./extract-hd";
+import { fetchPreparedImage } from "./prepare-image";
 
 export type ZipProgress = {
   phase: "fetch" | "zip" | "done" | "error";
@@ -18,7 +19,7 @@ async function mapPool<T, R>(
   async function worker() {
     while (cursor < list.length) {
       const i = cursor++;
-      ret[i] = await fn(list[i], i);
+      ret[i] = await fn(list[i]!, i);
     }
   }
   await Promise.all(
@@ -36,6 +37,7 @@ export async function downloadImagesAsZip(options: {
   zipName: string;
   folderInsideZip?: string;
   concurrency?: number;
+  convertToJpeg?: boolean;
   onProgress?: (p: ZipProgress) => void;
 }): Promise<{ ok: number; fail: number; zipName: string; bytes: number }> {
   const {
@@ -43,6 +45,7 @@ export async function downloadImagesAsZip(options: {
     zipName,
     folderInsideZip = "images",
     concurrency = 10,
+    convertToJpeg = true,
     onProgress,
   } = options;
 
@@ -58,19 +61,17 @@ export async function downloadImagesAsZip(options: {
   let done = 0;
   const fetched = await mapPool(items, concurrency, async (item) => {
     try {
-      const res = await fetch(item.url, { credentials: "omit", mode: "cors" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // arrayBuffer 比 blob 少一次拷贝，进 zip 更直接
-      const buf = await res.arrayBuffer();
+      const prepared = await fetchPreparedImage(item, convertToJpeg);
+      const buf = await prepared.blob.arrayBuffer();
       done += 1;
       // 进度回调降频：每完成 1 张仍更新数字，但文案别太碎也行——保持每张一次以便条走动
       log({
         phase: "fetch",
         current: done,
         total: items.length,
-        message: `已拉取 ${done}/${items.length}：${item.name}（${(buf.byteLength / 1048576).toFixed(2)}MB）`,
+        message: `已拉取 ${done}/${items.length}：${prepared.name}（${(buf.byteLength / 1048576).toFixed(2)}MB）${prepared.converted ? `，JPEG 转换前 ${(prepared.originalBytes / 1048576).toFixed(2)}MB` : ""}${prepared.warning ? `，${prepared.warning}` : ""}`,
       });
-      return { ok: true as const, item, data: buf };
+      return { ok: true as const, item: { ...item, name: prepared.name }, data: buf };
     } catch (e) {
       done += 1;
       log({

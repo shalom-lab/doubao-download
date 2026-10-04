@@ -6,6 +6,7 @@
  */
 (async function doubaoZipDownloadHd() {
   const PREFIX = "0001";
+  const CONVERT_TO_JPEG = true;
   const CONCURRENCY = 6;
   const TAG = "[doubao-hd]";
   const chatId = (location.pathname.match(/\/chat\/(\d+)/) || [])[1] || null;
@@ -182,9 +183,39 @@
     try {
       const res = await fetch(item.url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
+      let blob = await res.blob();
+      let outputItem = item;
+      if (CONVERT_TO_JPEG && blob.size > 2 * 1024 * 1024) {
+        let bitmap, canvas;
+        try {
+          bitmap = await createImageBitmap(blob);
+          canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("Canvas unavailable");
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(bitmap, 0, 0);
+          const jpeg = await new Promise((resolve, reject) => canvas.toBlob(
+            (jpeg) => jpeg?.type === "image/jpeg" ? resolve(jpeg) : reject(new Error("JPEG encode failed")),
+            "image/jpeg", 0.9
+          ));
+          if (jpeg.size < blob.size) {
+            blob = jpeg;
+            outputItem = { ...item, name: item.name.replace(/\.[^.]+$/, ".jpg") };
+          } else {
+            console.log(`${TAG} JPEG 体积未减小，保留原图`, item.name);
+          }
+        } catch (error) {
+          console.warn(`${TAG} JPEG 转换失败，保留原图`, item.name, error);
+        } finally {
+          bitmap?.close();
+          if (canvas) { canvas.width = 0; canvas.height = 0; }
+        }
+      }
       console.log(`${TAG} fetched ${item.index}/${items.length}`, item.name, `${(blob.size / 1048576).toFixed(2)}MB`);
-      return { ok: true, item, blob };
+      return { ok: true, item: outputItem, blob };
     } catch (e) {
       console.error(`${TAG} FAIL`, item.name, e);
       return { ok: false, item };

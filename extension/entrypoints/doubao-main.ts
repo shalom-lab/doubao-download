@@ -41,6 +41,7 @@ export type DoubaoHdRunResult = {
 };
 
 export type DoubaoHdApi = {
+  extractImages: typeof extractHdImages;
   logs: string[];
   progress: DoubaoHdProgress;
   running: boolean;
@@ -50,8 +51,8 @@ export type DoubaoHdApi = {
     | { ok: false; error: string }
     | null;
   /** 启动打包（立即返回，结果写入 jobResult） */
-  startRun: (opts: { prefix: string }) => boolean;
-  run: (opts: { prefix: string }) => Promise<DoubaoHdRunResult>;
+  startRun: (opts: { prefix: string; convertToJpeg?: boolean }) => boolean;
+  run: (opts: { prefix: string; convertToJpeg?: boolean }) => Promise<DoubaoHdRunResult>;
 };
 
 declare global {
@@ -79,6 +80,7 @@ export default defineUnlistedScript(() => {
   };
 
   const api: DoubaoHdApi = {
+    extractImages: extractHdImages,
     logs,
     progress: { phase: "idle", message: "就绪" },
     running: false,
@@ -126,9 +128,6 @@ export default defineUnlistedScript(() => {
             percent: Math.min(40, t.percent),
           });
         });
-        (window as unknown as { __doubaoHdImages?: typeof items }).__doubaoHdImages =
-          items;
-
         if (!items.length) {
           setProgress({
             phase: "error",
@@ -161,6 +160,7 @@ export default defineUnlistedScript(() => {
           zipName,
           folderInsideZip: prefix,
           concurrency: 10,
+          convertToJpeg: opts.convertToJpeg ?? true,
           onProgress: (p) => {
             if (p.phase === "fetch") {
               const cur = p.current ?? 0;

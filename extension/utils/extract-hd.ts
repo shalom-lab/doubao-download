@@ -31,15 +31,15 @@ export function sanitizePrefix(raw: string): string {
 
 export function getCurrentChatId(): string | null {
   const m = location.pathname.match(/\/chat\/(\d+)/);
-  return m ? m[1] : null;
+  return m?.[1] ?? null;
 }
 
-export function fileIdFromUrl(u: string): string | null {
-  const clean = String(u).split("?")[0];
+function fileIdFromUrl(u: string): string | null {
+  const clean = String(u).split("?")[0] || "";
   const m = clean.match(
     /\/([a-f0-9][a-f0-9._-]{7,}\.(?:jpg|jpeg|png|webp))(?:~|$)/i
   );
-  return m ? m[1] : null;
+  return m?.[1] ?? null;
 }
 
 function normalizeUrl(raw: string): string {

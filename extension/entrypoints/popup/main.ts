@@ -1,7 +1,21 @@
 import { sanitizePrefix } from "../../utils/extract-hd";
 
 const PREFIX_KEY = "doubao_hd_prefix";
-const MAIN_SCRIPT_FILE = "doubao-main.js";
+const JPEG_KEY = "doubao_convert_jpeg";
+const jpegEl = document.getElementById("convert-jpeg") as HTMLInputElement;
+let jpegChanged = false;
+let jpegSaveQueue = Promise.resolve();
+const jpegReady = browser.storage.local.get([JPEG_KEY]).then((stored) => {
+  if (!jpegChanged) jpegEl.checked = stored[JPEG_KEY] !== false;
+});
+void jpegReady.catch(() => setStatus("读取图片设置失败，请重新选择 JPEG 选项。", "err"));
+jpegEl.addEventListener("change", () => {
+  jpegChanged = true;
+  const enabled = jpegEl.checked;
+  jpegSaveQueue = jpegSaveQueue.catch(() => {}).then(() => browser.storage.local.set({ [JPEG_KEY]: enabled }));
+  void jpegSaveQueue.catch(() => setStatus("图片设置保存失败。", "err"));
+});
+const MAIN_SCRIPT_FILE = "/doubao-main.js";
 
 type ProgressPhase =
   | "idle"
@@ -70,7 +84,7 @@ const statPct = document.getElementById("stat-pct")!;
 function namingPreview(prefix: string, count?: number) {
   const p = sanitizePrefix(prefix);
   const n = count != null ? String(count) : "N";
-  return `${p}-共${n}张.zip → ${p}/${p}-01.png, ${p}-02.png …`;
+  return `${p}-共${n}张.zip → ${p}/${p}-01、${p}-02 …（后缀按实际格式）`;
 }
 
 function setPreview(text: string) {
@@ -149,10 +163,12 @@ async function copyConsoleFallback() {
 
   copyConsoleBtn.disabled = true;
   try {
-    const url = browser.runtime.getURL("doubao-console-batch-download.js");
+    const url = browser.runtime.getURL("/doubao-console-batch-download.js");
     const res = await fetch(url);
     if (!res.ok) throw new Error(`读取脚本失败 HTTP ${res.status}`);
     let text = await res.text();
+    await jpegReady;
+    text = text.replace("const CONVERT_TO_JPEG = true;", `const CONVERT_TO_JPEG = ${jpegEl.checked};`);
     text = text.replace(
       /const PREFIX = "0001";/,
       `const PREFIX = ${JSON.stringify(prefix)};`
@@ -198,7 +214,7 @@ async function pollMain(tabId: number): Promise<{
   running: boolean;
   jobResult: JobResult;
 }> {
-  const [{ result }] = await browser.scripting.executeScript({
+  const [injection] = await browser.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
     func: () => {
@@ -229,7 +245,7 @@ async function pollMain(tabId: number): Promise<{
     },
   });
   return (
-    result || {
+    injection?.result || {
       logs: [],
       progress: null,
       running: false,
@@ -238,23 +254,23 @@ async function pollMain(tabId: number): Promise<{
   );
 }
 
-async function startRunJob(tabId: number, prefix: string) {
-  const [{ result, error }] = await browser.scripting.executeScript({
+async function startRunJob(tabId: number, prefix: string, convertToJpeg: boolean) {
+  const [injection] = await browser.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
-    args: [prefix],
-    func: (p: string) => {
+    args: [prefix, convertToJpeg],
+    func: (p: string, jpeg: boolean) => {
       const api = (
         window as unknown as {
-          __DOUBAO_HD__?: { startRun: (o: { prefix: string }) => boolean };
+          __DOUBAO_HD__?: { startRun: (o: { prefix: string; convertToJpeg: boolean }) => boolean };
         }
       ).__DOUBAO_HD__;
       if (!api?.startRun) throw new Error("MAIN world 未就绪");
-      return api.startRun({ prefix: p });
+      return api.startRun({ prefix: p, convertToJpeg: jpeg });
     },
   });
-  if (error) throw new Error(String(error));
-  if (!result) throw new Error("无法启动任务（可能已有任务在跑）");
+  if (injection && "error" in injection && injection.error) throw new Error(String(injection.error));
+  if (!injection?.result) throw new Error("无法启动任务（可能已有任务在跑）");
 }
 
 runBtn.addEventListener("click", () => {
@@ -300,7 +316,8 @@ runBtn.addEventListener("click", () => {
       await paint();
 
       // 关键返回：真正干活在页面里异步跑，popup 只轮询进度
-      await startRunJob(tab.id, prefix);
+      await jpegReady;
+      await startRunJob(tab.id, prefix, jpegEl.checked);
 
       const deadline = Date.now() + 10 * 60 * 1000;
       while (Date.now() < deadline) {
@@ -349,3 +366,311 @@ runBtn.addEventListener("click", () => {
 });
 
 loadPrefs();
+
+// Content drafts stay in the extension; the page receives only image scan requests.
+type DraftImage = { id: string; url: string; name: string };
+type ContentDraft = { contents: string; reply_words: string; images: DraftImage[]; scanned: boolean };
+const contentEl = document.getElementById("contents") as HTMLTextAreaElement;
+const replyWordsEl = document.getElementById("reply_words") as HTMLInputElement;
+const imageList = document.getElementById("image-list")!;
+const composeStatus = document.getElementById("compose-status")!;
+const scanBtn = document.getElementById("scan-images") as HTMLButtonElement;
+const clipboardBtn = document.getElementById("read-clipboard") as HTMLButtonElement;
+const repoEl = document.getElementById("github-repo") as HTMLInputElement;
+const tokenEl = document.getElementById("github-token") as HTMLInputElement;
+const branchEl = document.getElementById("github-branch") as HTMLInputElement;
+const submitBtn = document.getElementById("submit-content") as HTMLButtonElement;
+let sourceUrl = "";
+let scanningImages = false;
+let draft: ContentDraft = { contents: "", reply_words: "", images: [], scanned: false };
+let draftKey = "doubao_content_draft:general";
+let sourceTabId: number | undefined;
+let draggedId: string | null = null;
+let composeOpened = false;
+let editVersion = 0;
+let saveQueue = Promise.resolve();
+const previewDialog = document.getElementById("image-preview") as HTMLDialogElement;
+const previewImage = document.getElementById("preview-image") as HTMLImageElement;
+const previewLoading = document.getElementById("preview-loading")!;
+const deleteDialog = document.getElementById("delete-confirm") as HTMLDialogElement;
+let pendingDeleteId: string | null = null;
+const editorControls = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>("#panel-compose input, #panel-compose textarea, #panel-compose button, #github-form input, #github-form button");
+editorControls.forEach((control) => { control.disabled = true; });
+
+function openPreview(item: DraftImage, index: number) {
+  if (draggedId) return;
+  document.getElementById("preview-title")!.textContent = `第 ${index + 1} 张`;
+  previewLoading.hidden = false;
+  previewLoading.textContent = "图片加载中…";
+  previewImage.onload = () => { previewLoading.hidden = true; };
+  previewImage.onerror = () => { previewLoading.textContent = "图片加载失败，请重新获取对话图片。"; };
+  previewImage.src = item.url;
+  previewDialog.showModal();
+}
+document.getElementById("close-preview")!.onclick = () => previewDialog.close();
+previewDialog.addEventListener("close", () => { previewImage.removeAttribute("src"); });
+previewDialog.addEventListener("click", (event) => {
+  if (event.target === previewDialog) {
+    const rect = previewDialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) previewDialog.close();
+  }
+});
+document.getElementById("cancel-delete")!.onclick = () => deleteDialog.close();
+deleteDialog.addEventListener("close", () => { pendingDeleteId = null; });
+document.getElementById("confirm-delete")!.onclick = () => {
+  const index = draft.images.findIndex((item) => item.id === pendingDeleteId);
+  if (index >= 0) {
+    draft.images.splice(index, 1);
+    renderImages();
+    persistDraft();
+  }
+  deleteDialog.close();
+};
+
+function saveDraft() {
+  draft.contents = contentEl.value;
+  draft.reply_words = replyWordsEl.value;
+  const snapshot = JSON.parse(JSON.stringify(draft)) as ContentDraft;
+  saveQueue = saveQueue.catch(() => {}).then(async () => {
+    await browser.storage.local.set({ [draftKey]: snapshot });
+  });
+  return saveQueue;
+}
+function persistDraft() {
+  void saveDraft().catch(() => { composeStatus.textContent = "草稿保存失败，请重试。"; });
+}
+function moveImage(from: number, to: number) {
+  if (from < 0 || to < 0 || from === to || to >= draft.images.length) return;
+  const [item] = draft.images.splice(from, 1);
+  if (!item) return;
+  draft.images.splice(to, 0, item);
+  renderImages();
+  persistDraft();
+}
+function renderImages() {
+  imageList.replaceChildren();
+  document.getElementById("image-count")!.textContent = String(draft.images.length);
+  if (!draft.images.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "暂无图片，可打开豆包大图预览后获取。";
+    imageList.append(empty);
+  }
+  draft.images.forEach((item, index) => {
+    const card = document.createElement("figure");
+    card.className = "image-card loading";
+    card.draggable = true;
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.alt = `对话图片 ${index + 1}`;
+    img.referrerPolicy = "no-referrer";
+    img.draggable = false;
+    img.tabIndex = 0;
+    img.setAttribute("role", "button");
+    img.setAttribute("aria-label", `放大第 ${index + 1} 张图片`);
+    img.onclick = () => openPreview(item, index);
+    img.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openPreview(item, index); }
+    };
+    const caption = document.createElement("figcaption");
+    caption.textContent = `第 ${index + 1} 张`;
+    img.addEventListener("load", () => { card.classList.remove("loading"); });
+    img.addEventListener("error", () => { card.classList.remove("loading"); caption.textContent = `第 ${index + 1} 张 · 加载失败`; });
+    img.src = item.url;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.title = "移除图片";
+    remove.draggable = false;
+    remove.className = "remove-image";
+    remove.setAttribute("aria-label", `删除第 ${index + 1} 张图片`);
+    remove.onclick = () => {
+      pendingDeleteId = item.id;
+      document.getElementById("delete-title")!.textContent = `移除第 ${index + 1} 张图片？`;
+      deleteDialog.showModal();
+    };
+    card.append(img, caption, remove);
+    card.ondragstart = (event) => {
+      draggedId = item.id;
+      event.dataTransfer?.setData("text/plain", item.id);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+    };
+    card.ondragover = (event) => { event.preventDefault(); card.classList.add("drag-over"); };
+    card.ondragleave = () => card.classList.remove("drag-over");
+    card.ondragend = () => {
+      draggedId = null;
+      imageList.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+    };
+    card.ondrop = (event) => {
+      event.preventDefault();
+      card.classList.remove("drag-over");
+      if (draggedId) moveImage(draft.images.findIndex((image) => image.id === draggedId), index);
+      draggedId = null;
+    };
+    imageList.append(card);
+  });
+}
+
+async function readClipboard(automatic = false) {
+  const version = editVersion;
+  if (automatic && contentEl.value) return;
+  clipboardBtn.disabled = true;
+  try {
+    const text = await navigator.clipboard.readText();
+    if (version !== editVersion) return;
+    if (!text) { if (!automatic) composeStatus.textContent = "剪贴板中没有文本。"; return; }
+    contentEl.value = text;
+    editVersion++;
+    await saveDraft();
+    composeStatus.textContent = "已读取剪贴板，可继续编辑。";
+  } catch {
+    composeStatus.textContent = "无法读取剪贴板，请在文本框手动粘贴。";
+  } finally { clipboardBtn.disabled = false; }
+}
+
+async function scanImages() {
+  if (scanningImages) return;
+  scanningImages = true;
+  submitBtn.disabled = true;
+  scanBtn.disabled = true;
+  composeStatus.textContent = "正在获取当前对话图片…";
+  try {
+    const tab = await getActiveDoubaoTab();
+    if (!tab?.id || !/\/chat\/\d+/.test(new URL(tab.url!).pathname)) throw new Error("请先打开豆包对话页。");
+    if (tab.id !== sourceTabId || `doubao_content_draft:${new URL(tab.url!).pathname}` !== draftKey) {
+      throw new Error("当前对话已切换，请重新打开扩展以编辑该对话。");
+    }
+    await ensureMainWorld(tab.id);
+    const [injection] = await browser.scripting.executeScript({
+      target: { tabId: tab.id }, world: "MAIN",
+      func: async () => {
+        const api = window.__DOUBAO_HD__;
+        if (!api?.extractImages) throw new Error("请刷新豆包页面后重试。");
+        return api.extractImages();
+      },
+    });
+    if (injection && "error" in injection && injection.error) throw new Error(String(injection.error));
+    const items = (injection?.result || []) as DraftImage[];
+    if (!items.length) throw new Error("未找到图片，请先点开一张图进入预览后再试。");
+    draft.images = items;
+    draft.scanned = true;
+    renderImages();
+    await saveDraft();
+    composeStatus.textContent = `已获取 ${items.length} 张图片，可拖动排序或删除。`;
+  } catch (error) {
+    composeStatus.textContent = error instanceof Error ? error.message : String(error);
+  } finally { scanBtn.disabled = false; scanningImages = false; submitBtn.disabled = false; }
+}
+
+const editorReady = (async () => {
+  const tab = await getActiveDoubaoTab();
+  sourceTabId = tab?.id;
+  sourceUrl = tab?.url ? new URL(tab.url).origin + new URL(tab.url).pathname : "";
+  if (tab?.url && /\/chat\/\d+/.test(new URL(tab.url).pathname)) draftKey = `doubao_content_draft:${new URL(tab.url).pathname}`;
+  const stored = await browser.storage.local.get([draftKey, "doubao_github_settings"]);
+  if (stored[draftKey]) {
+    const saved = stored[draftKey] as ContentDraft;
+    draft = { contents: saved.contents ?? "", reply_words: saved.reply_words ?? "", images: saved.images ?? [], scanned: !!saved.scanned };
+  }
+  contentEl.value = draft.contents;
+  replyWordsEl.value = draft.reply_words;
+  const settings = stored.doubao_github_settings as { repo?: string; token?: string; branch?: string } | undefined;
+  repoEl.value = settings?.repo || "";
+  tokenEl.value = settings?.token || "";
+  branchEl.value = settings?.branch || "";
+  editorControls.forEach((control) => { control.disabled = false; });
+})();
+editorReady.catch(() => { composeStatus.textContent = "读取本地配置失败，请重新打开扩展。"; });
+
+for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
+  tab.addEventListener("click", async () => {
+    try {
+      for (const button of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
+        const active = button === tab;
+        button.setAttribute("aria-pressed", String(active));
+        document.getElementById(`panel-${button.dataset.tab}`)!.hidden = !active;
+      }
+      await paint();
+      await editorReady;
+      if (tab.getAttribute("aria-pressed") !== "true") return;
+      if (tab.dataset.tab === "compose" && !composeOpened) {
+        composeOpened = true;
+        renderImages();
+        void readClipboard(true);
+        if (!draft.scanned) void scanImages();
+      }
+    } catch { composeStatus.textContent = "初始化失败，请重新打开扩展。"; }
+  });
+}
+contentEl.addEventListener("input", () => { editVersion++; persistDraft(); });
+replyWordsEl.addEventListener("input", persistDraft);
+clipboardBtn.addEventListener("click", () => { void readClipboard(); });
+scanBtn.addEventListener("click", () => { void scanImages(); });
+document.getElementById("submit-content")!.addEventListener("click", async () => {
+  if (scanningImages) return;
+  submitBtn.disabled = true;
+  try {
+    await jpegReady;
+    await saveDraft();
+    const input = { contents: contentEl.value, reply_words: replyWordsEl.value, url: sourceUrl, images: draft.images.map(({ url, name }) => ({ url, name })), convertToJpeg: jpegEl.checked };
+    if (!input.contents.trim() && !input.images.length) throw new Error("请填写 contents 或至少选择一张图片");
+    const result = await browser.runtime.sendMessage({ type: "upload:enqueue", input });
+    if (!result?.ok) throw new Error(result?.error || "无法保存上传任务");
+    composeStatus.textContent = result.existing
+      ? result.status === "done" ? "相同内容已上传，未重复创建记录。" : "相同任务已存在，请查看下方进度；失败任务可点击重试。"
+      : "任务已保存本地，可关闭弹窗。图片缓存和上传将在后台继续。";
+  } catch (error) { composeStatus.textContent = error instanceof Error ? error.message : "提交失败，请重试。"; }
+  finally { submitBtn.disabled = scanningImages; }
+});
+document.getElementById("github-form")!.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = document.getElementById("settings-status")!;
+  const repo = repoEl.value.trim().replace(/^https:\/\/github\.com\//i, "").replace(/\/$/, "").replace(/\.git$/, "");
+  if (!/^[a-z\d](?:[a-z\d-]*[a-z\d])?\/[a-z\d_.-]+$/i.test(repo)) {
+    status.textContent = "请输入 owner/repo 或完整 GitHub 仓库链接。";
+    return;
+  }
+  try {
+    await browser.storage.local.set({ doubao_github_settings: { repo, token: tokenEl.value.trim(), branch: branchEl.value.trim() } });
+    repoEl.value = repo;
+    status.textContent = "GitHub 设置已保存。";
+  } catch { status.textContent = "设置保存失败，请重试。"; }
+});
+
+type UploadSummary = { id: string; repo: string; status: string; message: string; done: number; total: number; url: string };
+function renderUploads(jobs: UploadSummary[]) {
+  const container = document.getElementById("upload-jobs")!;
+  container.replaceChildren();
+  if (!jobs.length) { container.textContent = "暂无上传任务"; return; }
+  for (const job of jobs) {
+    const row = document.createElement("div");
+    row.className = "upload-job";
+    const text = document.createElement("p");
+    text.textContent = `${job.repo} · ${job.done}/${job.total || "—"} · ${job.message}`;
+    row.append(text);
+    if (job.status === "failed") {
+      const retry = document.createElement("button");
+      retry.className = "btn-fallback";
+      retry.textContent = "重试";
+      retry.onclick = async () => {
+        retry.disabled = true;
+        try {
+          const result = await browser.runtime.sendMessage({ type: "upload:retry", id: job.id });
+          if (!result?.ok) throw new Error(result?.error || "重试失败");
+        } catch (error) { composeStatus.textContent = error instanceof Error ? error.message : "重试失败"; retry.disabled = false; }
+      };
+      row.append(retry);
+    }
+    if (job.status === "done" && job.url.startsWith("https://github.com/")) {
+      const link = document.createElement("a");
+      link.href = job.url; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = "查看仓库文件";
+      row.append(link);
+    }
+    container.append(row);
+  }
+}
+void browser.storage.local.get("doubao_upload_status").then((stored) => renderUploads((stored.doubao_upload_status || []) as UploadSummary[]));
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.doubao_upload_status) renderUploads((changes.doubao_upload_status.newValue || []) as UploadSummary[]);
+});

@@ -2,7 +2,7 @@
   "name": "doubao-download",
   "version": "1.0.0",
   "private": true,
-  "description": "豆包下载 — 一键 ZIP 打包对话高清图",
+  "description": "豆包下载 — 当前对话高清图 ZIP，以及本地队列后台上传 GitHub",
   "scripts": {
     "sync:console": "node -e \"require('fs').copyFileSync('../scripts/doubao-console-batch-download.js','public/doubao-console-batch-download.js')\"",
     "dev": "npm run sync:console && wxt",

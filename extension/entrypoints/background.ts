@@ -1,3 +1,4 @@
+import { CHAT_SUBMITS_KEY, chatSubmitKey, type ChatSubmitMap } from "../utils/chat-submit";
 import { BASE_PATH, CATEGORY, GithubError, makeMarkdown, makeRecord, putGithubFile, resolveBranch, validateInput, validateSettings, type GithubSettings, type UploadInput } from "../utils/github-upload";
 import { fetchPreparedImage } from "../utils/prepare-image";
 import { deleteFile, deleteJob, getFile, listJobs, saveFile, saveJob, type UploadJob } from "../utils/upload-store";
@@ -134,6 +135,18 @@ export default defineBackground(() => {
     const id = `${savedAt.replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}`;
     const job: UploadJob = { id, fingerprint, repo: settings.repo, branch: settings.branch?.trim() || "", input: normalized, savedAt, files: [], prepared: false, attempts: 0, nextAttempt: 0, status: "queued", message: "任务已保存本地，等待缓存和上传" };
     await saveJob(job);
+    const key = chatSubmitKey(normalized.url);
+    if (key) {
+      const storedCounts = await browser.storage.local.get(CHAT_SUBMITS_KEY);
+      const map: ChatSubmitMap = { ...((storedCounts[CHAT_SUBMITS_KEY] as ChatSubmitMap | undefined) || {}) };
+      const prev = map[key] || { count: 0, lastAt: "" };
+      map[key] = { count: prev.count + 1, lastAt: savedAt };
+      const keys = Object.keys(map);
+      if (keys.length > 300) {
+        for (const extra of keys.sort((a, b) => map[a]!.lastAt.localeCompare(map[b]!.lastAt)).slice(0, keys.length - 300)) delete map[extra];
+      }
+      await browser.storage.local.set({ [CHAT_SUBMITS_KEY]: map });
+    }
     await publish();
     return { id, existing: false, status: job.status };
   }

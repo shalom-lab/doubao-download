@@ -36,23 +36,33 @@ WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页点工具栏
 - 首次打开且 `contents` 为空时尝试读剪贴板；可手动改、再读剪贴板。
 - 图片交互与下载页相同（勾选、全选、拖拽、悬停放大）。只有勾选的图会上传。草稿按会话存在本地。
 - **提交**：立刻保存 IndexedDB 任务并反馈；拉图、转 JPEG、连 GitHub 都在后台。进度看「上传任务」（按**图片张数**计数，不含 JSON / Markdown）和扩展角标。相同内容不会重复建任务。
+- 发布页会按当前对话 URL（`/chat/{数字}`）显示**已提交几次**。分两批勾选提交计 2 次；同一内容重复点提交不另计。次数存在本机，与上传任务列表的 10 条上限无关。
 - **设置**：`owner/repo` 或仓库链接、可选分支、Token。Token 仅保存在本机，需要仓库 Contents 读写权限。未保存仓库/Token 时不能入队。
 
 ---
 
 ## 安装
 
+### 从 Release 安装（推荐）
+
+1. 打开 [Releases](https://github.com/shalom-lab/doubao-download/releases)，下载 `doubao-download-*-chrome.zip`
+2. 解压到任意文件夹
+3. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→ 「加载已解压的扩展程序」→ 选解压后的目录（含 `manifest.json`）
+4. 点工具栏图标打开右侧边栏（需 Chrome 114+）
+
+打 tag `vX.Y.Z`（或 Actions 里手动跑 **Release**）会自动构建 zip 并挂到 GitHub Release。
+
+### 本地开发
+
 ```bash
 cd extension
 npm install
 npm run dev       # 开发（自动打开带扩展的浏览器）
 npm run build     # → .output/chrome-mv3/
-npm run zip       # 扩展分发包
+npm run zip       # → .output/doubao-download-*-chrome.zip
 ```
 
-手动加载：`chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选 `extension/.output/chrome-mv3`。点工具栏图标打开右侧边栏。
-
-升级后请重新加载扩展以应用 `sidePanel` 等权限；若豆包页还在跑旧脚本，刷新页面。
+手动加载开发产物：选 `extension/.output/chrome-mv3`。升级后请重新加载扩展；若豆包页还在跑旧脚本，刷新页面。
 
 ---
 

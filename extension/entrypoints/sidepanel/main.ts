@@ -1,4 +1,5 @@
 import { sanitizePrefix } from "../../utils/extract-hd";
+import { CHAT_SUBMITS_KEY, chatIdFromKey, chatSubmitKey, type ChatSubmitMap } from "../../utils/chat-submit";
 
 const PREFIX_KEY = "doubao_hd_prefix";
 const JPEG_KEY = "doubao_convert_jpeg";
@@ -681,7 +682,7 @@ const editorReady = (async () => {
   sourceTabId = tab?.id;
   sourceUrl = tab?.url ? new URL(tab.url).origin + new URL(tab.url).pathname : "";
   if (tab?.url && /\/chat\/\d+/.test(new URL(tab.url).pathname)) draftKey = `doubao_content_draft:${new URL(tab.url).pathname}`;
-  const stored = await browser.storage.local.get([draftKey, "doubao_github_settings"]);
+  const stored = await browser.storage.local.get([draftKey, "doubao_github_settings", CHAT_SUBMITS_KEY]);
   if (stored[draftKey]) {
     const saved = stored[draftKey] as ContentDraft;
     draft = {
@@ -697,6 +698,7 @@ const editorReady = (async () => {
   repoEl.value = settings?.repo || "";
   tokenEl.value = settings?.token || "";
   branchEl.value = settings?.branch || "";
+  renderChatSubmits((stored[CHAT_SUBMITS_KEY] || {}) as ChatSubmitMap);
   editorControls.forEach((control) => { control.disabled = false; });
 })();
 editorReady.catch(() => { composeStatus.textContent = "读取本地配置失败，请重新打开扩展。"; });
@@ -798,5 +800,25 @@ function renderUploads(jobs: UploadSummary[]) {
 }
 void browser.storage.local.get("doubao_upload_status").then((stored) => renderUploads((stored.doubao_upload_status || []) as UploadSummary[]));
 browser.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.doubao_upload_status) renderUploads((changes.doubao_upload_status.newValue || []) as UploadSummary[]);
+  if (area !== "local") return;
+  if (changes.doubao_upload_status) renderUploads((changes.doubao_upload_status.newValue || []) as UploadSummary[]);
+  if (changes[CHAT_SUBMITS_KEY]) renderChatSubmits((changes[CHAT_SUBMITS_KEY].newValue || {}) as ChatSubmitMap);
 });
+
+function renderChatSubmits(map: ChatSubmitMap) {
+  const el = document.getElementById("chat-submit-summary")!;
+  const key = chatSubmitKey(sourceUrl);
+  if (!key) {
+    el.textContent = "打开豆包 /chat/数字 对话后，这里会按会话记下提交次数。";
+    return;
+  }
+  const id = chatIdFromKey(key);
+  const row = map[key];
+  if (!row?.count) {
+    el.textContent = `对话 ${id} · 还没提交过`;
+    return;
+  }
+  const last = new Date(row.lastAt);
+  const when = Number.isNaN(last.getTime()) ? "" : ` · 最近 ${last.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+  el.textContent = `对话 ${id} · 已提交 ${row.count} 次${when}`;
+}

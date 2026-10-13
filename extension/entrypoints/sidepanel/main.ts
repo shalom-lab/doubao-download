@@ -270,6 +270,66 @@ function picked(images: DraftImage[]) {
   return images.filter((item) => item.selected !== false);
 }
 
+type RangeAction = "select-before" | "select-after" | "clear-before" | "clear-after";
+type RangeMenuTarget = {
+  index: number;
+  images: DraftImage[];
+  listEl: HTMLElement;
+  countEl: HTMLElement;
+  verb: string;
+  onChange: () => void;
+};
+let rangeMenuTarget: RangeMenuTarget | null = null;
+const rangeMenu = document.getElementById("image-range-menu") as HTMLMenuElement;
+
+function hideRangeMenu() {
+  rangeMenu.hidden = true;
+  rangeMenuTarget = null;
+}
+
+function showRangeMenu(event: MouseEvent, target: RangeMenuTarget) {
+  event.preventDefault();
+  event.stopPropagation();
+  rangeMenuTarget = target;
+  rangeMenu.hidden = false;
+  const pad = 8;
+  const { width, height } = rangeMenu.getBoundingClientRect();
+  const left = Math.min(event.clientX, window.innerWidth - width - pad);
+  const top = Math.min(event.clientY, window.innerHeight - height - pad);
+  rangeMenu.style.left = `${Math.max(pad, left)}px`;
+  rangeMenu.style.top = `${Math.max(pad, top)}px`;
+}
+
+function applyRangeAction(action: RangeAction) {
+  const target = rangeMenuTarget;
+  hideRangeMenu();
+  if (!target) return;
+  const { index, images, listEl, countEl, verb, onChange } = target;
+  // Include the clicked card as the range endpoint for all four actions.
+  images.forEach((image, i) => {
+    if (action === "select-before" && i <= index) image.selected = true;
+    if (action === "select-after" && i >= index) image.selected = true;
+    if (action === "clear-before" && i <= index) image.selected = false;
+    if (action === "clear-after" && i >= index) image.selected = false;
+  });
+  renderPicker(listEl, countEl, images, verb, onChange);
+  onChange();
+}
+
+rangeMenu.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-range-action]");
+  if (!button?.dataset.rangeAction) return;
+  applyRangeAction(button.dataset.rangeAction as RangeAction);
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!rangeMenu.hidden && !rangeMenu.contains(event.target as Node)) hideRangeMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideRangeMenu();
+});
+window.addEventListener("blur", hideRangeMenu);
+window.addEventListener("resize", hideRangeMenu);
+
 function renderPicker(
   listEl: HTMLElement,
   countEl: HTMLElement,
@@ -340,8 +400,12 @@ function renderPicker(
       event.stopPropagation();
       if (!draggedId) openPreview(item, index);
     });
+    card.oncontextmenu = (event) => {
+      showRangeMenu(event, { index, images, listEl, countEl, verb, onChange });
+    };
     card.append(img, caption, selectHit, zoom);
     card.ondragstart = (event) => {
+      hideRangeMenu();
       if ((event.target as HTMLElement).closest(".select-hit, .zoom-image")) {
         event.preventDefault();
         return;
@@ -655,6 +719,92 @@ async function readClipboard(automatic = false) {
   } finally { clipboardBtn.disabled = false; }
 }
 
+function draftKeyFromUrl(url: string): string {
+  try {
+    const path = new URL(url).pathname;
+    if (/\/chat\/\d+/.test(path)) return `doubao_content_draft:${path}`;
+  } catch { /* ignore */ }
+  return "doubao_content_draft:general";
+}
+
+function sourceUrlFromTab(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.origin + parsed.pathname;
+  } catch {
+    return "";
+  }
+}
+
+const settingsReady = (async () => {
+  const stored = await browser.storage.local.get("doubao_github_settings");
+  const settings = stored.doubao_github_settings as { repo?: string; token?: string; branch?: string } | undefined;
+  repoEl.value = settings?.repo || "";
+  tokenEl.value = settings?.token || "";
+  branchEl.value = settings?.branch || "";
+  editorControls.forEach((control) => { control.disabled = false; });
+})();
+settingsReady.catch(() => { composeStatus.textContent = "读取本地配置失败，请重新打开扩展。"; });
+
+let bindQueue = Promise.resolve();
+async function bindActiveChat(options: { rescan?: boolean; silent?: boolean } = {}) {
+  await settingsReady;
+  await saveQueue.catch(() => {});
+  const tab = await getActiveDoubaoTab();
+  const nextKey = tab?.url ? draftKeyFromUrl(tab.url) : "doubao_content_draft:general";
+  const nextUrl = tab?.url ? sourceUrlFromTab(tab.url) : "";
+  const unchanged = tab?.id === sourceTabId && nextKey === draftKey && nextUrl === sourceUrl;
+  if (unchanged) {
+    const counts = await browser.storage.local.get(CHAT_SUBMITS_KEY);
+    renderChatSubmits((counts[CHAT_SUBMITS_KEY] || {}) as ChatSubmitMap);
+    return false;
+  }
+
+  if (contentEl.value || replyWordsEl.value || draft.images.length) {
+    await saveDraft().catch(() => {});
+  }
+
+  sourceTabId = tab?.id;
+  sourceUrl = nextUrl;
+  draftKey = nextKey;
+  editVersion++;
+  const stored = await browser.storage.local.get([draftKey, CHAT_SUBMITS_KEY]);
+  if (stored[draftKey]) {
+    const saved = stored[draftKey] as ContentDraft;
+    draft = {
+      contents: saved.contents ?? "",
+      reply_words: saved.reply_words ?? "",
+      images: (saved.images ?? []).map((item) => ({ ...item, selected: item.selected !== false })),
+      scanned: !!saved.scanned,
+    };
+  } else {
+    draft = { contents: "", reply_words: "", images: [], scanned: false };
+  }
+  contentEl.value = draft.contents;
+  replyWordsEl.value = draft.reply_words;
+  renderImages();
+  renderChatSubmits((stored[CHAT_SUBMITS_KEY] || {}) as ChatSubmitMap);
+
+  downloadScanned = false;
+  downloadImages = [];
+  renderDownloadImages();
+  void scanDownloadImages(true);
+
+  if (composeOpened) {
+    const id = chatIdFromKey(chatSubmitKey(sourceUrl));
+    if (!options.silent) {
+      composeStatus.textContent = id ? `已切换到对话 ${id}，正在同步…` : "当前不是豆包对话页。";
+    }
+    if (options.rescan !== false && id) void scanImages();
+  }
+  return true;
+}
+
+function scheduleBindActiveChat(options?: { rescan?: boolean; silent?: boolean }) {
+  bindQueue = bindQueue.catch(() => {}).then(() => bindActiveChat(options));
+  return bindQueue;
+}
+
 async function scanImages() {
   if (scanningImages) return;
   scanningImages = true;
@@ -662,11 +812,9 @@ async function scanImages() {
   scanBtn.disabled = true;
   composeStatus.textContent = "正在获取当前对话图片…";
   try {
+    await scheduleBindActiveChat({ rescan: false, silent: true });
     const tab = await getActiveDoubaoTab();
     if (!tab?.id || !/\/chat\/\d+/.test(new URL(tab.url!).pathname)) throw new Error("请先打开豆包对话页。");
-    if (tab.id !== sourceTabId || `doubao_content_draft:${new URL(tab.url!).pathname}` !== draftKey) {
-      throw new Error("当前对话已切换，请重新打开扩展以编辑该对话。");
-    }
     draft.images = await extractChatImages();
     draft.scanned = true;
     renderImages();
@@ -677,31 +825,18 @@ async function scanImages() {
   } finally { scanBtn.disabled = false; scanningImages = false; submitBtn.disabled = false; }
 }
 
-const editorReady = (async () => {
-  const tab = await getActiveDoubaoTab();
-  sourceTabId = tab?.id;
-  sourceUrl = tab?.url ? new URL(tab.url).origin + new URL(tab.url).pathname : "";
-  if (tab?.url && /\/chat\/\d+/.test(new URL(tab.url).pathname)) draftKey = `doubao_content_draft:${new URL(tab.url).pathname}`;
-  const stored = await browser.storage.local.get([draftKey, "doubao_github_settings", CHAT_SUBMITS_KEY]);
-  if (stored[draftKey]) {
-    const saved = stored[draftKey] as ContentDraft;
-    draft = {
-      contents: saved.contents ?? "",
-      reply_words: saved.reply_words ?? "",
-      images: (saved.images ?? []).map((item) => ({ ...item, selected: item.selected !== false })),
-      scanned: !!saved.scanned,
-    };
-  }
-  contentEl.value = draft.contents;
-  replyWordsEl.value = draft.reply_words;
-  const settings = stored.doubao_github_settings as { repo?: string; token?: string; branch?: string } | undefined;
-  repoEl.value = settings?.repo || "";
-  tokenEl.value = settings?.token || "";
-  branchEl.value = settings?.branch || "";
-  renderChatSubmits((stored[CHAT_SUBMITS_KEY] || {}) as ChatSubmitMap);
-  editorControls.forEach((control) => { control.disabled = false; });
-})();
+const editorReady = scheduleBindActiveChat({ rescan: false, silent: true });
 editorReady.catch(() => { composeStatus.textContent = "读取本地配置失败，请重新打开扩展。"; });
+
+browser.tabs.onActivated.addListener(() => {
+  void scheduleBindActiveChat({ rescan: true });
+});
+browser.tabs.onUpdated.addListener((tabId, info) => {
+  if (!info.url && info.status !== "complete") return;
+  void browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    if (tabs[0]?.id === tabId) void scheduleBindActiveChat({ rescan: true });
+  });
+});
 
 for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
   tab.addEventListener("click", async () => {
@@ -719,10 +854,12 @@ for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
         renderImages();
         void readClipboard(true);
         if (!draft.scanned) void scanImages();
+        else void scheduleBindActiveChat({ rescan: false, silent: true });
       }
     } catch { composeStatus.textContent = "初始化失败，请重新打开扩展。"; }
   });
 }
+document.querySelector<HTMLButtonElement>('[data-tab="compose"]')?.click();
 contentEl.addEventListener("input", () => { editVersion++; persistDraft(); });
 replyWordsEl.addEventListener("input", persistDraft);
 clipboardBtn.addEventListener("click", () => { void readClipboard(); });

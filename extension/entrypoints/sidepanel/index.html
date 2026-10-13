@@ -9,10 +9,10 @@
   <body>
     <div class="shell">
       <nav class="tabs" aria-label="功能切换">
-        <button type="button" data-tab="download" aria-pressed="true" aria-label="图片下载" title="图片下载">
+        <button type="button" data-tab="download" aria-pressed="false" aria-label="图片下载" title="图片下载">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4" /></svg>
         </button>
-        <button type="button" data-tab="compose" aria-pressed="false" aria-label="内容发布" title="内容发布">
+        <button type="button" data-tab="compose" aria-pressed="true" aria-label="内容发布" title="内容发布">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-5 5 5-5 5 5M5 16v4h14v-4" /></svg>
         </button>
         <button type="button" data-tab="settings" aria-pressed="false" aria-label="GitHub 设置" title="GitHub 设置">
@@ -20,7 +20,7 @@
         </button>
       </nav>
       <label class="jpeg-option"><input id="convert-jpeg" type="checkbox" checked /> 大于 2MB 的图片转为 JPEG（下载 / 上传）</label>
-      <main class="main" id="panel-download">
+      <main class="main" id="panel-download" hidden>
         <section class="card">
           <label class="field">
             <span class="label">文件名前缀</span>
@@ -47,7 +47,7 @@
             <button type="button" id="scan-download-images" class="btn-mini">获取图片</button>
           </div>
         </div>
-        <p class="hint">点图片主体即可勾选；悬停后左下角可放大。可拖拽排序，勾选的会按此顺序打包。</p>
+        <p class="hint">点图勾选；右键可批量选中/取消「这张及之前 / 及之后」。</p>
         <div id="download-image-list" class="image-list"></div>
 
         <button id="run" class="btn" type="button">
@@ -99,7 +99,7 @@
           <pre id="log" class="log">就绪</pre>
         </section>
       </main>
-      <section class="main" id="panel-compose" hidden aria-label="内容编辑">
+      <section class="main" id="panel-compose" aria-label="内容编辑">
         <label class="field" for="contents"><span class="label">contents</span></label>
         <textarea id="contents" name="contents" rows="6" placeholder="自动读取剪贴板，也可以手动粘贴和修改"></textarea>
         <button type="button" id="read-clipboard" class="btn btn-ghost">读取剪贴板</button>
@@ -113,12 +113,11 @@
             <button type="button" id="scan-images" class="btn-mini">获取图片</button>
           </div>
         </div>
-        <p class="hint">点图片主体即可勾选；悬停后左下角可放大。可拖拽排序，勾选的会上传。</p>
+        <p class="hint">点图勾选；右键可批量选中/取消「这张及之前 / 及之后」。</p>
         <div id="image-list" class="image-list"></div>
         <p id="chat-submit-summary" class="submit-summary" role="status">打开豆包对话后，这里会显示本会话已提交几次。</p>
         <button type="button" id="submit-content" class="btn">提交到 GitHub</button>
-        <p class="hint">先保存本地任务，再后台缓存图片并上传到 infoflow-data/Prompts/。无需等待上传完成。</p>
-        <p id="compose-status" class="status" role="status">内容和图片顺序会自动保存。</p>
+        <p id="compose-status" class="status" role="status"></p>
         <section class="card"><strong>上传任务</strong><div id="upload-jobs" aria-live="polite"><p class="hint">暂无上传任务</p></div></section>
       </section>
       <section class="main" id="panel-settings" hidden aria-label="GitHub 设置">
@@ -138,6 +137,12 @@
       <p id="preview-loading" class="hint" role="status">图片加载中…</p>
       <img id="preview-image" alt="图片预览" referrerpolicy="no-referrer" />
     </dialog>
+    <menu id="image-range-menu" class="range-menu" hidden>
+      <button type="button" data-range-action="select-before">选中这张及之前</button>
+      <button type="button" data-range-action="select-after">选中这张及之后</button>
+      <button type="button" data-range-action="clear-before">取消这张及之前</button>
+      <button type="button" data-range-action="clear-after">取消这张及之后</button>
+    </menu>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

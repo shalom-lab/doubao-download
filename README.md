@@ -1,6 +1,6 @@
 # 豆包下载
 
-WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页点工具栏图标，打开 **Chrome 右侧边栏**（不是小弹窗），做两件事：
+WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+Shift+D`** 或点工具栏图标，打开 **Chrome 右侧边栏**（不是小弹窗），做两件事：
 
 1. **图片下载**：只扫当前 `/chat/{id}` 会话的高清图，勾选并排好顺序后打成 ZIP。
 2. **内容发布**：编辑 `contents` / `reply_words` 和图片，点提交先写入本地队列，后台再上传 GitHub。关掉侧边栏也会继续。
@@ -48,7 +48,7 @@ WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页点工具栏
 1. 打开 [Releases](https://github.com/shalom-lab/doubao-download/releases)，下载 `doubao-download-*-chrome.zip`
 2. 解压到任意文件夹
 3. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→ 「加载已解压的扩展程序」→ 选解压后的目录（含 `manifest.json`）
-4. 点工具栏图标打开右侧边栏（需 Chrome 114+）
+4. 用 `Alt+Shift+D` 或点工具栏图标打开右侧边栏（需 Chrome 114+；快捷键可在 `chrome://extensions/shortcuts` 调整）
 
 打 tag `vX.Y.Z`（或 Actions 里手动跑 **Release**）会自动构建 zip 并挂到 GitHub Release。
 

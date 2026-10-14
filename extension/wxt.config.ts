@@ -17,5 +17,18 @@ export default defineConfig({
     action: {
       default_title: "豆包下载",
     },
+    // 打开侧边栏（与点击工具栏图标相同）。用 Alt+Shift+D，避开 Linux GNOME 的 Ctrl+Alt+D「显示桌面」。
+    commands: {
+      _execute_action: {
+        description: "打开豆包下载侧边栏",
+        suggested_key: {
+          default: "Alt+Shift+D",
+          windows: "Alt+Shift+D",
+          mac: "Alt+Shift+D",
+          linux: "Alt+Shift+D",
+          chromeos: "Alt+Shift+D",
+        },
+      },
+    },
   },
 });

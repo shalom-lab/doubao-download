@@ -116,6 +116,14 @@
         <p class="hint">点图勾选；右键可批量选中/取消「这张及之前 / 及之后」。</p>
         <div id="image-list" class="image-list"></div>
         <p id="chat-submit-summary" class="submit-summary" role="status">打开豆包对话后，这里会显示本会话已提交几次。</p>
+        <section class="card repo-target" aria-label="上传仓库">
+          <label class="field">
+            <span class="label">上传仓库</span>
+            <select id="compose-preset" aria-label="当前上传仓库，可切换预设">
+              <option value="">暂无预设</option>
+            </select>
+          </label>
+        </section>
         <button type="button" id="submit-content" class="btn">提交到 GitHub</button>
         <p id="compose-status" class="status" role="status"></p>
         <section class="card"><strong>上传任务</strong><div id="upload-jobs" aria-live="polite"><p class="hint">暂无上传任务</p></div></section>
@@ -129,6 +137,14 @@
           <p class="hint">Token 需要目标仓库的 Contents 读写权限。数据目录固定为 infoflow-data。</p>
           <button class="btn" type="submit">保存设置</button>
         </form>
+        <section class="card" id="panel-presets" aria-label="仓库预设">
+          <strong>仓库预设</strong>
+          <p class="hint">以 owner/repo 为名保存上方配置；点预设即可填回上方输入框。</p>
+          <button type="button" id="preset-save" class="btn btn-ghost">存为预设</button>
+          <div id="preset-list" class="preset-list" aria-live="polite">
+            <p class="hint">暂无预设</p>
+          </div>
+        </section>
         <p id="settings-status" class="status" role="status">填写后保存，供后续提交使用。</p>
       </section>
     </div>
@@ -136,6 +152,14 @@
       <div class="dialog-heading"><strong id="preview-title">图片预览</strong><button type="button" id="close-preview" aria-label="关闭预览">×</button></div>
       <p id="preview-loading" class="hint" role="status">图片加载中…</p>
       <img id="preview-image" alt="图片预览" referrerpolicy="no-referrer" />
+    </dialog>
+    <dialog id="preset-delete-dialog" aria-label="确认删除预设">
+      <div class="dialog-heading"><strong>确认删除预设</strong><button type="button" id="preset-delete-cancel-x" aria-label="关闭">×</button></div>
+      <p id="preset-delete-message" class="hint">确定删除该预设？上方当前设置不会被清空。</p>
+      <div class="preset-actions">
+        <button type="button" id="preset-delete-cancel" class="btn btn-ghost">取消</button>
+        <button type="button" id="preset-delete-confirm" class="btn btn-danger">确认删除</button>
+      </div>
     </dialog>
     <menu id="image-range-menu" class="range-menu" hidden>
       <button type="button" data-range-action="select-before">选中这张及之前</button>

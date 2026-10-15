@@ -649,7 +649,19 @@ const clipboardBtn = document.getElementById("read-clipboard") as HTMLButtonElem
 const repoEl = document.getElementById("github-repo") as HTMLInputElement;
 const tokenEl = document.getElementById("github-token") as HTMLInputElement;
 const branchEl = document.getElementById("github-branch") as HTMLInputElement;
+const presetListEl = document.getElementById("preset-list")!;
+const composePresetSelect = document.getElementById("compose-preset") as HTMLSelectElement;
+const presetSaveBtn = document.getElementById("preset-save") as HTMLButtonElement;
+const settingsStatus = document.getElementById("settings-status")!;
 const submitBtn = document.getElementById("submit-content") as HTMLButtonElement;
+const GITHUB_SETTINGS_KEY = "doubao_github_settings";
+const GITHUB_PRESETS_KEY = "doubao_github_presets";
+type GithubSettingsFields = { repo: string; token: string; branch: string };
+type GithubPreset = GithubSettingsFields & { id: string };
+type GithubPresetStore = { presets: GithubPreset[]; activeId: string };
+let githubPresets: GithubPreset[] = [];
+let activePresetId = "";
+let activeSettings: GithubSettingsFields = { repo: "", token: "", branch: "" };
 let sourceUrl = "";
 let scanningImages = false;
 let draft: ContentDraft = { contents: "", reply_words: "", images: [], scanned: false };
@@ -661,9 +673,145 @@ let saveQueue = Promise.resolve();
 const previewDialog = document.getElementById("image-preview") as HTMLDialogElement;
 const previewImage = document.getElementById("preview-image") as HTMLImageElement;
 const previewLoading = document.getElementById("preview-loading")!;
-const editorControls = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>("#panel-compose input, #panel-compose textarea, #panel-compose button, #github-form input, #github-form button");
+const editorControls = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement | HTMLSelectElement>("#panel-compose input, #panel-compose textarea, #panel-compose button, #panel-compose select, #github-form input, #github-form button, #panel-presets button");
 editorControls.forEach((control) => { control.disabled = true; });
 
+function normalizeRepo(raw: string) {
+  return raw.trim().replace(/^https:\/\/github\.com\//i, "").replace(/\/$/, "").replace(/\.git$/, "");
+}
+function isValidRepo(repo: string) {
+  return /^[a-z\d](?:[a-z\d-]*[a-z\d])?\/[a-z\d_.-]+$/i.test(repo);
+}
+function readSettingsFromForm(): GithubSettingsFields {
+  return { repo: normalizeRepo(repoEl.value), token: tokenEl.value.trim(), branch: branchEl.value.trim() };
+}
+function fillSettingsForm(settings: Partial<GithubSettingsFields>) {
+  repoEl.value = settings.repo || "";
+  tokenEl.value = settings.token || "";
+  branchEl.value = settings.branch || "";
+}
+function presetStorePayload(): GithubPresetStore {
+  return { presets: githubPresets, activeId: activePresetId };
+}
+async function persistActiveSettings(settings: GithubSettingsFields) {
+  activeSettings = settings;
+  await browser.storage.local.set({ [GITHUB_SETTINGS_KEY]: settings });
+  renderComposeRepoTarget();
+}
+async function persistPresetStore() {
+  await browser.storage.local.set({ [GITHUB_PRESETS_KEY]: presetStorePayload() });
+}
+/** Write active settings + preset list together so UI/upload never diverge mid-switch. */
+async function persistSettingsAndPresets(settings: GithubSettingsFields) {
+  activeSettings = settings;
+  await browser.storage.local.set({
+    [GITHUB_SETTINGS_KEY]: settings,
+    [GITHUB_PRESETS_KEY]: presetStorePayload(),
+  });
+  renderComposeRepoTarget();
+}
+function renderComposeRepoTarget() {
+  composePresetSelect.replaceChildren();
+  if (!githubPresets.length) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = activeSettings.repo || "暂无预设，请先在设置页「存为预设」";
+    composePresetSelect.append(empty);
+    composePresetSelect.disabled = true;
+    return;
+  }
+  if (!activePresetId && activeSettings.repo) {
+    const custom = document.createElement("option");
+    custom.value = "";
+    custom.textContent = activeSettings.repo;
+    composePresetSelect.append(custom);
+  } else if (!activePresetId) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "选择上传仓库…";
+    composePresetSelect.append(empty);
+  }
+  for (const item of githubPresets) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.repo;
+    composePresetSelect.append(option);
+  }
+  composePresetSelect.value = activePresetId;
+  composePresetSelect.disabled = false;
+}
+function renderPresetList() {
+  const previous = activePresetId;
+  activePresetId = githubPresets.some((item) => item.id === previous) ? previous : "";
+  presetListEl.replaceChildren();
+  if (!githubPresets.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "暂无预设";
+    presetListEl.append(empty);
+    renderComposeRepoTarget();
+    return;
+  }
+  for (const preset of githubPresets) {
+    const row = document.createElement("div");
+    row.className = "preset-item";
+    const load = document.createElement("button");
+    load.type = "button";
+    load.className = `preset-load${preset.id === activePresetId ? " is-active" : ""}`;
+    load.dataset.presetId = preset.id;
+    const label = document.createElement("span");
+    label.className = "preset-load-name";
+    label.textContent = preset.repo;
+    load.append(label);
+    if (preset.branch) {
+      const branch = document.createElement("span");
+      branch.className = "preset-load-repo";
+      branch.textContent = `@ ${preset.branch}`;
+      load.append(branch);
+    }
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "preset-remove";
+    remove.dataset.presetId = preset.id;
+    remove.setAttribute("aria-label", `删除预设 ${preset.repo}`);
+    remove.textContent = "×";
+    row.append(load, remove);
+    presetListEl.append(row);
+  }
+  renderComposeRepoTarget();
+}
+/** Clicking a preset fills the original form above (and makes it the active upload target). */
+async function loadPresetIntoForm(id: string, statusEl: HTMLElement) {
+  const preset = githubPresets.find((item) => item.id === id);
+  if (!preset) {
+    renderPresetList();
+    statusEl.textContent = "预设不存在，已刷新列表。";
+    return;
+  }
+  try {
+    fillSettingsForm(preset);
+    activePresetId = preset.id;
+    await persistSettingsAndPresets({ repo: preset.repo, token: preset.token, branch: preset.branch });
+    renderPresetList();
+    statusEl.textContent = `已切换到 ${preset.repo}。`;
+  } catch { statusEl.textContent = "载入预设失败，请重试。"; }
+}
+async function switchToPreset(id: string, statusEl: HTMLElement) {
+  if (!id) {
+    if (!activePresetId) {
+      renderPresetList();
+      return;
+    }
+    activePresetId = "";
+    renderPresetList();
+    try {
+      await persistPresetStore();
+      statusEl.textContent = "已取消预设选择；当前仍使用已保存的生效仓库。";
+    } catch { statusEl.textContent = "预设状态保存失败，请重试。"; }
+    return;
+  }
+  await loadPresetIntoForm(id, statusEl);
+}
 function openPreview(item: DraftImage, index: number) {
   if (draggedId) return;
   document.getElementById("preview-title")!.textContent = `第 ${index + 1} 张`;
@@ -737,14 +885,37 @@ function sourceUrlFromTab(url: string): string {
 }
 
 const settingsReady = (async () => {
-  const stored = await browser.storage.local.get("doubao_github_settings");
-  const settings = stored.doubao_github_settings as { repo?: string; token?: string; branch?: string } | undefined;
-  repoEl.value = settings?.repo || "";
-  tokenEl.value = settings?.token || "";
-  branchEl.value = settings?.branch || "";
+  const stored = await browser.storage.local.get([GITHUB_SETTINGS_KEY, GITHUB_PRESETS_KEY]);
+  const settings = stored[GITHUB_SETTINGS_KEY] as Partial<GithubSettingsFields> | undefined;
+  const presetStore = stored[GITHUB_PRESETS_KEY] as GithubPresetStore | undefined;
+  const rawPresets = Array.isArray(presetStore?.presets) ? presetStore!.presets : [];
+  githubPresets = rawPresets
+    .map((item) => {
+      const repo = normalizeRepo(String((item as GithubPreset & { name?: string })?.repo || (item as { name?: string })?.name || ""));
+      if (!item || typeof item.id !== "string" || !isValidRepo(repo)) return null;
+      return {
+        id: item.id,
+        repo,
+        token: typeof item.token === "string" ? item.token : "",
+        branch: typeof item.branch === "string" ? item.branch : "",
+      } satisfies GithubPreset;
+    })
+    .filter((item): item is GithubPreset => !!item);
+  const requestedId = typeof presetStore?.activeId === "string" ? presetStore.activeId : "";
+  activePresetId = githubPresets.some((item) => item.id === requestedId) ? requestedId : "";
+  // Original form always reflects saved settings, not a forced preset overwrite.
+  activeSettings = { repo: settings?.repo || "", token: settings?.token || "", branch: settings?.branch || "" };
+  fillSettingsForm(activeSettings);
+  const needsRewrite = requestedId !== activePresetId
+    || rawPresets.length !== githubPresets.length
+    || rawPresets.some((item) => item && "name" in item);
+  if (needsRewrite) await persistPresetStore();
+  renderPresetList();
   editorControls.forEach((control) => { control.disabled = false; });
 })();
-settingsReady.catch(() => { composeStatus.textContent = "读取本地配置失败，请重新打开扩展。"; });
+settingsReady.catch(() => {
+  composeStatus.textContent = "读取本地配置失败，请重新打开扩展。";
+});
 
 let bindQueue = Promise.resolve();
 async function bindActiveChat(options: { rescan?: boolean; silent?: boolean } = {}) {
@@ -888,17 +1059,105 @@ document.getElementById("submit-content")!.addEventListener("click", async () =>
 });
 document.getElementById("github-form")!.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const status = document.getElementById("settings-status")!;
-  const repo = repoEl.value.trim().replace(/^https:\/\/github\.com\//i, "").replace(/\/$/, "").replace(/\.git$/, "");
-  if (!/^[a-z\d](?:[a-z\d-]*[a-z\d])?\/[a-z\d_.-]+$/i.test(repo)) {
-    status.textContent = "请输入 owner/repo 或完整 GitHub 仓库链接。";
+  const settings = readSettingsFromForm();
+  if (!isValidRepo(settings.repo)) {
+    settingsStatus.textContent = "请输入 owner/repo 或完整 GitHub 仓库链接。";
     return;
   }
   try {
-    await browser.storage.local.set({ doubao_github_settings: { repo, token: tokenEl.value.trim(), branch: branchEl.value.trim() } });
-    repoEl.value = repo;
-    status.textContent = "GitHub 设置已保存。";
-  } catch { status.textContent = "设置保存失败，请重试。"; }
+    repoEl.value = settings.repo;
+    const preset = activePresetId ? githubPresets.find((item) => item.id === activePresetId) : undefined;
+    // Saving the original form only updates active settings; presets stay as snapshots unless user clicks「存为预设」.
+    if (preset && (preset.repo !== settings.repo || preset.token !== settings.token || preset.branch !== settings.branch)) {
+      activePresetId = "";
+    }
+    await persistSettingsAndPresets(settings);
+    renderPresetList();
+    settingsStatus.textContent = "GitHub 设置已保存。";
+  } catch { settingsStatus.textContent = "设置保存失败，请重试。"; }
+});
+
+composePresetSelect.addEventListener("change", () => {
+  void switchToPreset(composePresetSelect.value, composeStatus);
+});
+
+presetSaveBtn.addEventListener("click", async () => {
+  const settings = readSettingsFromForm();
+  if (!isValidRepo(settings.repo)) {
+    settingsStatus.textContent = "请先填写上方有效的 owner/repo，再存为预设。";
+    return;
+  }
+  try {
+    repoEl.value = settings.repo;
+    const existing = githubPresets.find((item) => item.repo === settings.repo);
+    if (existing) {
+      Object.assign(existing, settings);
+      activePresetId = existing.id;
+      settingsStatus.textContent = `已更新预设 ${settings.repo}。`;
+    } else {
+      const preset: GithubPreset = { id: crypto.randomUUID(), ...settings };
+      githubPresets.push(preset);
+      activePresetId = preset.id;
+      settingsStatus.textContent = `已保存预设 ${settings.repo}。`;
+    }
+    await persistSettingsAndPresets(settings);
+    renderPresetList();
+  } catch { settingsStatus.textContent = "存为预设失败，请重试。"; }
+});
+
+const presetDeleteDialog = document.getElementById("preset-delete-dialog") as HTMLDialogElement;
+const presetDeleteMessage = document.getElementById("preset-delete-message")!;
+let pendingDeletePresetId = "";
+
+function closePresetDeleteDialog() {
+  pendingDeletePresetId = "";
+  if (presetDeleteDialog.open) presetDeleteDialog.close();
+}
+
+function askDeletePreset(id: string) {
+  const preset = githubPresets.find((item) => item.id === id);
+  if (!preset) {
+    settingsStatus.textContent = "预设不存在，已刷新列表。";
+    renderPresetList();
+    return;
+  }
+  pendingDeletePresetId = preset.id;
+  presetDeleteMessage.textContent = `确定删除预设 ${preset.repo}？上方当前设置不会被清空。`;
+  presetDeleteDialog.showModal();
+}
+
+presetListEl.addEventListener("click", (event) => {
+  const target = event.target as HTMLElement | null;
+  const remove = target?.closest<HTMLButtonElement>("button.preset-remove");
+  if (remove?.dataset.presetId) {
+    askDeletePreset(remove.dataset.presetId);
+    return;
+  }
+  const load = target?.closest<HTMLButtonElement>("button.preset-load");
+  if (load?.dataset.presetId) void loadPresetIntoForm(load.dataset.presetId, settingsStatus);
+});
+
+document.getElementById("preset-delete-confirm")!.addEventListener("click", async () => {
+  const preset = githubPresets.find((item) => item.id === pendingDeletePresetId);
+  closePresetDeleteDialog();
+  if (!preset) {
+    settingsStatus.textContent = "预设不存在或已删除。";
+    return;
+  }
+  try {
+    githubPresets = githubPresets.filter((item) => item.id !== preset.id);
+    if (activePresetId === preset.id) activePresetId = "";
+    await persistPresetStore();
+    renderPresetList();
+    settingsStatus.textContent = `已删除预设 ${preset.repo}。`;
+  } catch { settingsStatus.textContent = "删除预设失败，请重试。"; }
+});
+
+document.getElementById("preset-delete-cancel")!.addEventListener("click", closePresetDeleteDialog);
+document.getElementById("preset-delete-cancel-x")!.addEventListener("click", closePresetDeleteDialog);
+presetDeleteDialog.addEventListener("cancel", () => { pendingDeletePresetId = ""; });
+presetDeleteDialog.addEventListener("click", (event) => {
+  if (event.target === presetDeleteDialog) closePresetDeleteDialog();
 });
 
 type UploadSummary = { id: string; repo: string; status: string; message: string; done: number; total: number; url: string };

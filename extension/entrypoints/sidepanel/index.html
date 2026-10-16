@@ -126,7 +126,13 @@
         </section>
         <button type="button" id="submit-content" class="btn">提交到 GitHub</button>
         <p id="compose-status" class="status" role="status"></p>
-        <section class="card"><strong>上传任务</strong><div id="upload-jobs" aria-live="polite"><p class="hint">暂无上传任务</p></div></section>
+        <section class="card">
+          <div class="image-heading">
+            <strong>上传任务</strong>
+            <button type="button" id="clear-upload-jobs" class="btn-mini" disabled>清空列表</button>
+          </div>
+          <div id="upload-jobs" aria-live="polite"><p class="hint">暂无上传任务</p></div>
+        </section>
       </section>
       <section class="main" id="panel-settings" hidden aria-label="GitHub 设置">
         <form id="github-form" class="card">

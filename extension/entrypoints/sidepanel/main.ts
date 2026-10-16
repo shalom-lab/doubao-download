@@ -1161,9 +1161,12 @@ presetDeleteDialog.addEventListener("click", (event) => {
 });
 
 type UploadSummary = { id: string; repo: string; status: string; message: string; done: number; total: number; url: string };
+const clearUploadJobsBtn = document.getElementById("clear-upload-jobs") as HTMLButtonElement;
 function renderUploads(jobs: UploadSummary[]) {
   const container = document.getElementById("upload-jobs")!;
   container.replaceChildren();
+  const clearable = jobs.filter((job) => job.status === "done" || job.status === "failed").length;
+  clearUploadJobsBtn.disabled = !clearable;
   if (!jobs.length) { container.textContent = "暂无上传任务"; return; }
   for (const job of jobs) {
     const row = document.createElement("div");
@@ -1194,6 +1197,20 @@ function renderUploads(jobs: UploadSummary[]) {
     container.append(row);
   }
 }
+clearUploadJobsBtn.addEventListener("click", async () => {
+  if (clearUploadJobsBtn.disabled) return;
+  clearUploadJobsBtn.disabled = true;
+  try {
+    const result = await browser.runtime.sendMessage({ type: "upload:clear" });
+    if (!result?.ok) throw new Error(result?.error || "清空失败");
+    composeStatus.textContent = result.cleared
+      ? `已清空 ${result.cleared} 条完成/失败任务。`
+      : "没有可清空的任务。";
+  } catch (error) {
+    composeStatus.textContent = error instanceof Error ? error.message : "清空失败";
+    clearUploadJobsBtn.disabled = false;
+  }
+});
 void browser.storage.local.get("doubao_upload_status").then((stored) => renderUploads((stored.doubao_upload_status || []) as UploadSummary[]));
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;

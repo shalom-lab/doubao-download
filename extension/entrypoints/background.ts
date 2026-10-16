@@ -150,15 +150,28 @@ export default defineBackground(() => {
     await publish();
     return { id, existing: false, status: job.status };
   }
+  async function clearFinishedJobs() {
+    const jobs = await listJobs();
+    // Keep queued/running so in-flight uploads are not interrupted.
+    const removable = jobs.filter((job) => job.status === "done" || job.status === "failed");
+    for (const job of removable) {
+      for (const file of job.files) await deleteFile(file.key).catch(() => {});
+      await deleteJob(job.id);
+    }
+    await publish();
+    return { cleared: removable.length };
+  }
+
   browser.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== browser.runtime.id || sender.url?.split("?")[0] !== browser.runtime.getURL("/sidepanel.html")) return;
-    if (!message || !["upload:enqueue", "upload:retry"].includes(message.type)) return;
+    if (!message || !["upload:enqueue", "upload:retry", "upload:clear"].includes(message.type)) return;
     // Serialize enqueue operations to prevent double-clicks creating duplicate jobs.
     mutations = mutations.catch(() => {}).then(async () => {
       try {
         await ensureAlarm();
         let result;
         if (message.type === "upload:enqueue") result = await enqueue(message.input);
+        else if (message.type === "upload:clear") result = await clearFinishedJobs();
         else {
           const job = (await listJobs()).find((row) => row.id === message.id);
           if (!job || job.status !== "failed") throw new Error("该任务当前不能重试");
@@ -167,7 +180,7 @@ export default defineBackground(() => {
           result = { id: job.id };
         }
         respond({ ok: true, ...result });
-        kick();
+        if (message.type !== "upload:clear") kick();
       } catch (error) {
         respond({ ok: false, error: error instanceof Error ? error.message : "无法保存上传任务" });
       }

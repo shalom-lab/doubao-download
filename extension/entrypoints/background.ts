@@ -191,6 +191,17 @@ export default defineBackground(() => {
   browser.runtime.onStartup.addListener(() => { void ensureAlarm().then(kick); });
   browser.runtime.onInstalled.addListener(() => { void ensureAlarm().then(kick); });
   void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  browser.commands.onCommand.addListener((command, tab) => {
+    const target = command === "open-download" ? "download" : command === "open-compose" ? "compose" : null;
+    if (!target || tab?.windowId === undefined) return;
+    // Open immediately to retain the keyboard command's user gesture.
+    const opening = browser.sidePanel.open({ windowId: tab.windowId });
+    // Session storage delivers the selection both to existing and newly opened panels.
+    void browser.storage.session.set({
+      [`doubao_panel_shortcut_${tab.windowId}`]: { target, nonce: crypto.randomUUID() },
+    }).catch(console.error);
+    void opening.catch(console.error);
+  });
   // Restrict credentials to extension pages and the service worker.
   void browser.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
   void ensureAlarm().then(kick);

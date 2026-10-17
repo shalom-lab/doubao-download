@@ -48,7 +48,7 @@ WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+S
 1. 打开 [Releases](https://github.com/shalom-lab/doubao-download/releases)，下载 `doubao-download-*-chrome.zip`
 2. 解压到任意文件夹
 3. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→ 「加载已解压的扩展程序」→ 选解压后的目录（含 `manifest.json`）
-4. 用 `Alt+Shift+D` 或点工具栏图标打开右侧边栏（需 Chrome 114+；快捷键可在 `chrome://extensions/shortcuts` 调整）
+4. 用 `Alt+Shift+D` 或点工具栏图标打开右侧边栏（需 Chrome 114+）；Chrome 116+ 还支持 `Alt+Shift+I` 打开图片下载、`Alt+Shift+U` 打开内容发布。三个快捷键都可在 `chrome://extensions/shortcuts` 调整，冲突未绑定时可手动设置。下载/上传快捷键只打开对应页面，选好内容后点击打包或提交。
 
 打 tag `vX.Y.Z`（或 Actions 里手动跑 **Release**）会自动构建 zip 并挂到 GitHub Release。
 

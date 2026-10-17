@@ -21,7 +21,17 @@
 2. **优先快捷键**打开右侧 Side Panel：`Alt+Shift+D`（Mac 同为 Option+Shift+D）。与点工具栏扩展图标效果相同。
 3. 也可点 Chrome **工具栏**上的扩展图标（豆包下载 / 常显示为豆状图标）。
 4. **不是**页面内弹窗；打开后看浏览器**右侧栏**，不是网页中间。
-5. 快捷键无效时：打开 `chrome://extensions/shortcuts`，给「豆包下载」绑定 `Alt+Shift+D`。
+5. 快捷键无效时：打开 `chrome://extensions/shortcuts`，检查「豆包下载」各项绑定；用户可自行修改，冲突时可能未自动绑定。
+
+### 三个快捷键
+
+| 默认快捷键 | 功能 |
+|------------|------|
+| `Alt+Shift+D` | 打开插件侧边栏，与工具栏图标相同 |
+| `Alt+Shift+I` | 打开侧边栏并切到「图片下载」 |
+| `Alt+Shift+U` | 打开侧边栏并切到「内容发布」（上传 GitHub） |
+
+Mac 上 Alt 对应 Option。下载和上传页面快捷键需要 Chrome 116+；仅进入对应页面，不会自动打包或提交。侧边栏已打开时也可用快捷键切换页面。实际按键以 `chrome://extensions/shortcuts` 中的绑定为准。
 
 ### 侧边栏三个 Tab（从左到右）
 
@@ -61,7 +71,7 @@
 ## 3. 工作要求
 
 - 先确认标签页是豆包 `/chat/数字`；否则停下来让用户打开。
-- **默认打开的是「内容发布」Tab**；要下载必须先点左侧第一个 Tab「图片下载」。
+- 初次打开默认是「内容发布」Tab；本次浏览器会话可能保留上次快捷键选择。操作前确认当前 Tab：下载用 `Alt+Shift+I` 或点「图片下载」，上传用 `Alt+Shift+U` 或点「内容发布」。
 - 第三个「GitHub 设置」交给人类；Agent 不主动填 Token。
 - 用点击侧边栏 UI 完成操作：优先点带 `aria-label` 的 Tab 与 `#run` / `#submit-content`，再读 `#status` / `#compose-status` 判断成败。
 
@@ -73,11 +83,11 @@
 
 ### Step 2 — 打开 Side Panel
 
-按 `Alt+Shift+D`，或点工具栏「豆包下载」图标；等待**右侧**侧边栏出现（不是页面弹层）。无效则检查 `chrome://extensions/shortcuts`。
+下载优先按 `Alt+Shift+I`，上传优先按 `Alt+Shift+U`；也可按 `Alt+Shift+D` 或点工具栏「豆包下载」图标，再选择对应 Tab。等待**右侧**侧边栏出现（不是页面弹层）。无效则检查 `chrome://extensions/shortcuts`；Chrome 114–115 用工具栏图标或打开插件快捷键，再手动切换 Tab。
 
 ### Step 3A — 下载 ZIP
 
-1. 点 Tab `aria-label="图片下载"`（`data-tab="download"`）。
+1. 确认「图片下载」已打开；否则按 `Alt+Shift+I` 或点 Tab `aria-label="图片下载"`（`data-tab="download"`）。
 2. （可选）填 `#prefix`，如 `0001`。
 3. 若列表为空：点「获取图片」。
 4. 按需全选 / 右键区间勾选 / 拖拽排序。
@@ -86,7 +96,7 @@
 
 ### Step 3B — 提交 GitHub
 
-1. 点 Tab `aria-label="内容发布"`（通常已打开）。
+1. 确认「内容发布」已打开；否则按 `Alt+Shift+U` 或点 Tab `aria-label="内容发布"`。
 2. 确认 `#contents` / `#reply_words`；可用「读取剪贴板」。
 3. 「获取图片」→ 勾选要上传的图。
 4. 确认人类已在「GitHub 设置」保存过 repo + Token。

@@ -19,6 +19,14 @@ export default defineConfig({
     },
     // 打开侧边栏（与点击工具栏图标相同）。用 Alt+Shift+D，避开 Linux GNOME 的 Ctrl+Alt+D「显示桌面」。
     commands: {
+      "open-download": {
+        description: "打开图片下载",
+        suggested_key: { default: "Alt+Shift+I" },
+      },
+      "open-compose": {
+        description: "打开内容发布（上传 GitHub）",
+        suggested_key: { default: "Alt+Shift+U" },
+      },
       _execute_action: {
         description: "打开豆包下载侧边栏",
         suggested_key: {

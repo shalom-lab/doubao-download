@@ -1031,6 +1031,23 @@ for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
   });
 }
 document.querySelector<HTMLButtonElement>('[data-tab="compose"]')?.click();
+void browser.windows.getCurrent().then(async (window) => {
+  const key = `doubao_panel_shortcut_${window.id}`;
+  let changed = false;
+  const select = (value: unknown) => {
+    const target = (value as { target?: string } | undefined)?.target;
+    if (target === "download" || target === "compose") {
+      document.querySelector<HTMLButtonElement>(`[data-tab="${target}"]`)?.click();
+    }
+  };
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== "session" || !changes[key]) return;
+    changed = true;
+    select(changes[key].newValue);
+  });
+  const stored = await browser.storage.session.get(key);
+  if (!changed) select(stored[key]);
+}).catch(console.error);
 contentEl.addEventListener("input", () => { editVersion++; persistDraft(); });
 replyWordsEl.addEventListener("input", persistDraft);
 clipboardBtn.addEventListener("click", () => { void readClipboard(); });

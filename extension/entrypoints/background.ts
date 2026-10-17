@@ -192,6 +192,14 @@ export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(() => { void ensureAlarm().then(kick); });
   void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   browser.commands.onCommand.addListener((command, tab) => {
+    if (command === "execute-download" || command === "execute-upload") {
+      if (tab?.windowId === undefined) return;
+      // Execution is transient: never save it for replay when a panel reopens.
+      void browser.runtime.sendMessage({
+        type: "panel:execute", command, windowId: tab.windowId,
+      }).catch(() => {}); // No open panel means there is no button to click.
+      return;
+    }
     const target = command === "open-download" ? "download" : command === "open-compose" ? "compose" : null;
     if (!target || tab?.windowId === undefined) return;
     // Open immediately to retain the keyboard command's user gesture.

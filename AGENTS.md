@@ -18,20 +18,23 @@
 ### 打开方式（最容易错）
 
 1. 当前标签必须是豆包对话：`https://www.doubao.com/chat/` + 数字。
-2. **优先快捷键**打开右侧 Side Panel：`Alt+Shift+D`（Mac 同为 Option+Shift+D）。与点工具栏扩展图标效果相同。
+2. **优先快捷键**打开右侧 Side Panel 并进入目标页：下载用 `Alt+Shift+I`，发布用 `Alt+Shift+U`（Mac 的 Alt 为 Option；需 Chrome 116+）。
 3. 也可点 Chrome **工具栏**上的扩展图标（豆包下载 / 常显示为豆状图标）。
 4. **不是**页面内弹窗；打开后看浏览器**右侧栏**，不是网页中间。
 5. 快捷键无效时：打开 `chrome://extensions/shortcuts`，检查「豆包下载」各项绑定；用户可自行修改，冲突时可能未自动绑定。
 
-### 三个快捷键
+### 四个快捷键命令
 
 | 默认快捷键 | 功能 |
 |------------|------|
-| `Alt+Shift+D` | 打开插件侧边栏，与工具栏图标相同 |
 | `Alt+Shift+I` | 打开侧边栏并切到「图片下载」 |
 | `Alt+Shift+U` | 打开侧边栏并切到「内容发布」（上传 GitHub） |
+| `Ctrl+Shift+8` | 执行打包下载：等同于点击「打包下载」按钮 |
+| `Ctrl+Shift+9` | 执行提交到 GitHub：等同于点击「提交到 GitHub」按钮 |
 
-Mac 上 Alt 对应 Option。下载和上传页面快捷键需要 Chrome 116+；仅进入对应页面，不会自动打包或提交。侧边栏已打开时也可用快捷键切换页面。实际按键以 `chrome://extensions/shortcuts` 中的绑定为准。
+Mac 上 Alt 对应 Option，执行命令的 Ctrl 对应 Command。下载和上传页面快捷键需要 Chrome 116+；仅进入对应页面，不会自动打包或提交。侧边栏已打开时也可用快捷键切换页面。实际按键以 `chrome://extensions/shortcuts` 中的绑定为准。
+
+取消原来的打开插件默认快捷键 `Alt+Shift+D`，可直接点工具栏图标打开。升级后如 Chrome 仍保留旧绑定，请在快捷键设置中手动清除。四组默认按键都可能与其他软件冲突，以快捷键设置中的实际绑定为准。执行前须在当前窗口打开对应页面，选好图片、填写内容，等待按钮可用；执行快捷键复用按钮的校验与处理逻辑。页面未打开、处于其他 Tab 或按钮禁用时不执行，也不会留到下次打开时补执行。
 
 ### 侧边栏三个 Tab（从左到右）
 
@@ -83,7 +86,7 @@ Mac 上 Alt 对应 Option。下载和上传页面快捷键需要 Chrome 116+；�
 
 ### Step 2 — 打开 Side Panel
 
-下载优先按 `Alt+Shift+I`，上传优先按 `Alt+Shift+U`；也可按 `Alt+Shift+D` 或点工具栏「豆包下载」图标，再选择对应 Tab。等待**右侧**侧边栏出现（不是页面弹层）。无效则检查 `chrome://extensions/shortcuts`；Chrome 114–115 用工具栏图标或打开插件快捷键，再手动切换 Tab。
+下载优先按 `Alt+Shift+I`，上传优先按 `Alt+Shift+U`；也可点工具栏「豆包下载」图标，再选择对应 Tab。等待**右侧**侧边栏出现（不是页面弹层）。无效则检查 `chrome://extensions/shortcuts`；Chrome 114–115 用工具栏图标，再手动切换 Tab。
 
 ### Step 3A — 下载 ZIP
 
@@ -91,7 +94,7 @@ Mac 上 Alt 对应 Option。下载和上传页面快捷键需要 Chrome 116+；�
 2. （可选）填 `#prefix`，如 `0001`。
 3. 若列表为空：点「获取图片」。
 4. 按需全选 / 右键区间勾选 / 拖拽排序。
-5. 点「打包下载」`#run`。
+5. 点「打包下载」`#run`，或按已绑定的「执行打包下载」快捷键。
 6. 看 `#status` / 进度条直到完成；ZIP 名形如 `0001-共10张.zip`。
 
 ### Step 3B — 提交 GitHub
@@ -100,7 +103,7 @@ Mac 上 Alt 对应 Option。下载和上传页面快捷键需要 Chrome 116+；�
 2. 确认 `#contents` / `#reply_words`；可用「读取剪贴板」。
 3. 「获取图片」→ 勾选要上传的图。
 4. 确认人类已在「GitHub 设置」保存过 repo + Token。
-5. 点「提交到 GitHub」`#submit-content`。
+5. 点「提交到 GitHub」`#submit-content`，或按已绑定的「执行提交到 GitHub」快捷键。
 6. 看 `#compose-status` 与「上传任务」；提交成功即可，上传可在后台继续。
 
 ### Step 4 — 失败快检

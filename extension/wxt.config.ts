@@ -17,8 +17,15 @@ export default defineConfig({
     action: {
       default_title: "豆包下载",
     },
-    // 打开侧边栏（与点击工具栏图标相同）。用 Alt+Shift+D，避开 Linux GNOME 的 Ctrl+Alt+D「显示桌面」。
     commands: {
+      "execute-download": {
+        description: "执行打包下载（需打开图片下载页）",
+        suggested_key: { default: "Ctrl+Shift+8" },
+      },
+      "execute-upload": {
+        description: "执行提交到 GitHub（需打开内容发布页）",
+        suggested_key: { default: "Ctrl+Shift+9" },
+      },
       "open-download": {
         description: "打开图片下载",
         suggested_key: { default: "Alt+Shift+I" },
@@ -26,16 +33,6 @@ export default defineConfig({
       "open-compose": {
         description: "打开内容发布（上传 GitHub）",
         suggested_key: { default: "Alt+Shift+U" },
-      },
-      _execute_action: {
-        description: "打开豆包下载侧边栏",
-        suggested_key: {
-          default: "Alt+Shift+D",
-          windows: "Alt+Shift+D",
-          mac: "Alt+Shift+D",
-          linux: "Alt+Shift+D",
-          chromeos: "Alt+Shift+D",
-        },
       },
     },
   },

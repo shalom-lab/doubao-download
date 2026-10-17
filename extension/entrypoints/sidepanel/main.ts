@@ -527,6 +527,8 @@ async function startRunJob(
 }
 
 runBtn.addEventListener("click", () => {
+  if (runBtn.disabled) return;
+  runBtn.disabled = true;
   void (async () => {
     if (downloadScanTask) await downloadScanTask.catch(() => {});
     const prefix = sanitizePrefix(prefixEl.value);
@@ -1032,6 +1034,16 @@ for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
 }
 document.querySelector<HTMLButtonElement>('[data-tab="compose"]')?.click();
 void browser.windows.getCurrent().then(async (window) => {
+  browser.runtime.onMessage.addListener((message, sender) => {
+    if (sender.id !== browser.runtime.id || message?.type !== "panel:execute" || message.windowId !== window.id) return;
+    const target = message.command === "execute-download" ? "download"
+      : message.command === "execute-upload" ? "compose" : null;
+    if (!target || document.visibilityState !== "visible") return;
+    const panel = document.getElementById(`panel-${target}`)!;
+    const button = target === "download" ? runBtn : submitBtn;
+    // Match an enabled button on the visible page; do not switch or initialize drafts.
+    if (!panel.hidden && !button.disabled) button.click();
+  });
   const key = `doubao_panel_shortcut_${window.id}`;
   let changed = false;
   const select = (value: unknown) => {

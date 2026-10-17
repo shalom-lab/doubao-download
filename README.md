@@ -1,6 +1,6 @@
 # 豆包下载
 
-WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+Shift+D`** 或点工具栏图标，打开 **Chrome 右侧边栏**（不是小弹窗），做两件事：
+WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+Shift+I` / `Alt+Shift+U`** 或点工具栏图标，打开 **Chrome 右侧边栏**（不是小弹窗），做两件事：
 
 1. **图片下载**：只扫当前 `/chat/{id}` 会话的高清图，勾选并排好顺序后打成 ZIP。
 2. **内容发布**：编辑 `contents` / `reply_words` 和图片，点提交先写入本地队列，后台再上传 GitHub。关掉侧边栏也会继续。
@@ -48,7 +48,7 @@ WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+S
 1. 打开 [Releases](https://github.com/shalom-lab/doubao-download/releases)，下载 `doubao-download-*-chrome.zip`
 2. 解压到任意文件夹
 3. Chrome 打开 `chrome://extensions` → 开启「开发者模式」→ 「加载已解压的扩展程序」→ 选解压后的目录（含 `manifest.json`）
-4. 用 `Alt+Shift+D` 或点工具栏图标打开右侧边栏（需 Chrome 114+）；Chrome 116+ 还支持 `Alt+Shift+I` 打开图片下载、`Alt+Shift+U` 打开内容发布。三个快捷键都可在 `chrome://extensions/shortcuts` 调整，冲突未绑定时可手动设置。下载/上传快捷键只打开对应页面，选好内容后点击打包或提交。
+4. 点工具栏图标打开右侧边栏（需 Chrome 114+）；Chrome 116+ 还支持 `Alt+Shift+I` 打开图片下载、`Alt+Shift+U` 打开内容发布。执行快捷键为 `Ctrl+Shift+8` 打包下载、`Ctrl+Shift+9` 提交到 GitHub（Mac 为 Command+Shift+8/9）：在当前窗口打开对应页面、选好内容且按钮可用时，按键等同于点击打包或提交。页面关闭、其他 Tab 或按钮禁用时不执行。所有绑定都可在 `chrome://extensions/shortcuts` 修改；若冲突未自动绑定，请手动设置。原 `Alt+Shift+D` 默认绑定已取消，升级后若仍保留旧绑定可手动清除。
 
 打 tag `vX.Y.Z`（或 Actions 里手动跑 **Release**）会自动构建 zip 并挂到 GitHub Release。
 

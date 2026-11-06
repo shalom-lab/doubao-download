@@ -1,6 +1,6 @@
 /**
  * 通用提取：只收「当前对话」里的高清生成图。
- * 提速策略：优先扫 <img>（最快）→ 仅「保存」按钮 Fiber 补 raw → 找不到才加重扫描。
+ * 提速策略：优先扫 <img> / source → 生成图 imageContent 原图 → 「保存」按钮 Fiber 补 raw → 找不到才加重扫描。
  */
 
 export type Quality = "raw" | "dld" | "cpreview";
@@ -17,6 +17,19 @@ const BYTEIMG_TPLV_RE =
 
 const NOISE_RE =
   /image-qvalue|\/icon\/|passport|user-avatar|avatar|favicon|emoji|sticker/i;
+
+/**
+ * 新旧模板并存。
+ * raw：image_raw.png / image_raw_b.png，以及 image_raw_hflow:token=.png
+ * dld：image_dld* / cdld_wm*，以及 cgen_lwm*
+ * cpreview：cpreview_wm* / cgen_wm*；cthumb 只作最低兜底
+ */
+const RAW_TPL_RE =
+  /image_raw(?:_b)?(?:_[a-z0-9]+)*(?::[^?=]+)?=\.(?:png|jpe?g)|image_raw(?:_b)?\.(?:png|jpe?g)/i;
+const DLD_TPL_RE =
+  /(?:image_dld_watermark[^~?]*|cdld_wm\d+)\.(?:png|jpe?g)|cgen_lwm\d*(?:_[a-z0-9]+)*(?::[^?=]+)?=\.(?:png|jpe?g)/i;
+const PREVIEW_TPL_RE =
+  /cpreview_wm\d+\.(?:png|jpe?g)|cgen_wm\d*(?:_[a-z0-9]+)*(?::[^?=]+)?=\.(?:png|jpe?g)|cthumb(?:_[a-z0-9]+)*(?::[^?=]+)?=\.(?:png|jpe?g)/i;
 
 type VariantMap = Map<string, Partial<Record<Quality, string>>>;
 
@@ -49,10 +62,9 @@ function normalizeUrl(raw: string): string {
 function classifyQuality(u: string): Quality | null {
   if (!u || NOISE_RE.test(u) || /\.heic(\?|$)/i.test(u)) return null;
   if (!/byteimg\.com/i.test(u) || !/~tplv-/i.test(u)) return null;
-  if (/image_raw(_b)?\.(png|jpe?g)/i.test(u)) return "raw";
-  if (/(image_dld_watermark[^~?]*|cdld_wm\d+)\.(png|jpe?g)/i.test(u))
-    return "dld";
-  if (/cpreview_wm\d+\.(png|jpe?g)/i.test(u)) return "cpreview";
+  if (RAW_TPL_RE.test(u)) return "raw";
+  if (DLD_TPL_RE.test(u)) return "dld";
+  if (PREVIEW_TPL_RE.test(u)) return "cpreview";
   return null;
 }
 
@@ -61,11 +73,13 @@ function scoreVariant(u: string, q: Quality): number {
   if (/\.png(\?|$)/i.test(u)) s += 10;
   if (/\.jpe?g(\?|$)/i.test(u)) s += 4;
   if (q === "cpreview") {
-    if (/cpreview_wm0/i.test(u)) s += 8;
-    else if (/cpreview_wm1/i.test(u)) s += 2;
+    if (/cpreview_wm0|cgen_wm0/i.test(u)) s += 8;
+    else if (/cpreview_wm1|cgen_wm1/i.test(u)) s += 2;
+    else if (/cthumb/i.test(u)) s -= 4;
   }
-  if (q === "raw" && /image_raw(_b)?\.png/i.test(u)) s += 6;
-  if (q === "dld" && /cdld_wm|image_dld/i.test(u) && /\.png/i.test(u)) s += 6;
+  if (q === "raw" && /image_raw/i.test(u) && /\.png(\?|$)/i.test(u)) s += 6;
+  if (q === "dld" && /cdld_wm|image_dld|cgen_lwm/i.test(u) && /\.png(\?|$)/i.test(u))
+    s += 6;
   return s;
 }
 
@@ -151,9 +165,53 @@ function harvestImgsFast(bag: VariantMap) {
     for (const img of root.querySelectorAll("img")) {
       if (isSidebarConversationLink(img)) continue;
       const el = img as HTMLImageElement;
-      harvestString(el.currentSrc || el.src, bag);
+      const current = el.currentSrc || "";
+      const attrSrc = el.getAttribute("src") || "";
+      if (current) harvestString(current, bag);
+      if (attrSrc && attrSrc !== current) harvestString(attrSrc, bag);
       const srcset = el.getAttribute("srcset");
       if (srcset) harvestString(srcset, bag);
+    }
+    for (const source of root.querySelectorAll("source")) {
+      if (isSidebarConversationLink(source)) continue;
+      harvestString(source.getAttribute("srcset"), bag);
+      harvestString(source.getAttribute("src"), bag);
+    }
+  }
+}
+
+/** 新版生成图：原图在 imageContent.image_ori_raw，不在 <img src> */
+function harvestImageContentFiber(bag: VariantMap) {
+  const roots: Element[] = [];
+  const msg = getMessageList();
+  if (msg) roots.push(msg);
+  else {
+    const main = document.querySelector("main");
+    if (main) roots.push(main);
+  }
+  for (const el of document.querySelectorAll('[role="dialog"]')) {
+    roots.push(el);
+  }
+
+  const seen = new Set<Element>();
+  for (const root of roots) {
+    if (seen.has(root)) continue;
+    seen.add(root);
+    for (const el of root.querySelectorAll('[data-testid="mdbox_image"]')) {
+      if (isSidebarConversationLink(el)) continue;
+      let fiber = findReactFiber(el);
+      for (let i = 0; i < 16 && fiber; i += 1) {
+        const ic = fiber.memoizedProps?.imageContent;
+        if (ic) {
+          harvestString(ic.image_ori_raw?.url, bag);
+          harvestString(ic.image_ori?.url, bag);
+          harvestString(ic.image_preview?.url, bag);
+          harvestString(ic.image_preview_resize?.url, bag);
+          harvestString(ic.image_thumb?.url, bag);
+          break;
+        }
+        fiber = fiber.return;
+      }
     }
   }
 }
@@ -252,6 +310,7 @@ export async function extractHdImages(
 
   tick("快速扫描图片…", 20);
   harvestImgsFast(bag);
+  harvestImageContentFiber(bag);
   await yieldMain();
 
   // 有预览「保存」时补 raw（成本低、收益高）

@@ -1,5 +1,6 @@
 import { sanitizePrefix } from "../../utils/extract-hd";
 import { CHAT_SUBMITS_KEY, chatIdFromKey, chatSubmitKey, type ChatSubmitMap } from "../../utils/chat-submit";
+import { isSupportedChatUrl } from "../../utils/site";
 
 const PREFIX_KEY = "doubao_hd_prefix";
 const JPEG_KEY = "doubao_convert_jpeg";
@@ -193,12 +194,22 @@ copyConsoleBtn.addEventListener("click", () => {
   copyConsoleFallback().catch(() => {});
 });
 
-async function getActiveDoubaoTab() {
+async function getActiveChatTab() {
   const tabs = await browser.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
   if (!tab?.id || !tab.url) return null;
-  if (!/^https:\/\/([a-z0-9-]+\.)?doubao\.com\//i.test(tab.url)) return null;
-  return tab;
+  try {
+    const host = new URL(tab.url).hostname.toLowerCase();
+    if (host === "doubao.com" || host.endsWith(".doubao.com")) return tab;
+    if (host === "chatgpt.com" || host.endsWith(".chatgpt.com")) return tab;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function getActiveDoubaoTab() {
+  return getActiveChatTab();
 }
 
 async function ensureMainWorld(tabId: number) {
@@ -264,6 +275,7 @@ let downloadImages: DraftImage[] = [];
 let downloadScanned = false;
 let scanningDownload = false;
 let extractingImages: Promise<DraftImage[]> | undefined;
+let extractingForUrl = "";
 let draggedId: string | null = null;
 
 function picked(images: DraftImage[]) {
@@ -450,56 +462,92 @@ function setAllSelected(images: DraftImage[], selected: boolean, render: () => v
 }
 
 async function extractChatImages(): Promise<DraftImage[]> {
-  if (!extractingImages) {
+  const tab = await getActiveChatTab();
+  if (!tab?.id || !isSupportedChatUrl(tab.url!)) {
+    throw new Error("请先打开豆包或 ChatGPT 对话页。");
+  }
+  const requestUrl = sourceUrlFromTab(tab.url!);
+  if (!extractingImages || extractingForUrl !== requestUrl) {
+    extractingForUrl = requestUrl;
     extractingImages = (async () => {
-      const tab = await getActiveDoubaoTab();
-      if (!tab?.id || !/\/chat\/\d+/.test(new URL(tab.url!).pathname)) throw new Error("请先打开豆包对话页。");
-      await ensureMainWorld(tab.id);
+      const live = await getActiveChatTab();
+      if (!live?.id || !isSupportedChatUrl(live.url!)) {
+        throw new Error("请先打开豆包或 ChatGPT 对话页。");
+      }
+      const liveUrl = sourceUrlFromTab(live.url!);
+      if (liveUrl !== requestUrl) throw new Error("对话已切换，请重新获取图片。");
+      await ensureMainWorld(live.id);
       const [injection] = await browser.scripting.executeScript({
-        target: { tabId: tab.id }, world: "MAIN",
+        target: { tabId: live.id }, world: "MAIN",
         func: async () => {
           const api = window.__DOUBAO_HD__;
-          if (!api?.extractImages) throw new Error("请刷新豆包页面后重试。");
+          if (!api?.extractImages) throw new Error("请刷新对话页面后重试。");
           return api.extractImages();
         },
       });
       if (injection && "error" in injection && injection.error) throw new Error(String(injection.error));
+      const still = await getActiveChatTab();
+      const stillUrl = still?.url ? sourceUrlFromTab(still.url) : "";
+      if (stillUrl !== requestUrl) throw new Error("对话已切换，请重新获取图片。");
       const items = (injection?.result || []) as DraftImage[];
-      if (!items.length) throw new Error("未找到图片，请先点开一张图进入预览后再试。");
+      if (!items.length) throw new Error("未找到当前对话图片，请等页面加载完或点开一张图后再试。");
       return items.map((item) => ({ ...item, selected: true as const }));
-    })();
+    })().finally(() => {
+      if (extractingForUrl === requestUrl) {
+        extractingImages = undefined;
+        extractingForUrl = "";
+      }
+    });
   }
-  try {
-    const items = await extractingImages;
-    return items.map((item) => ({ ...item }));
-  } finally { extractingImages = undefined; }
+  const items = await extractingImages;
+  const active = await getActiveChatTab();
+  const activeUrl = active?.url ? sourceUrlFromTab(active.url) : "";
+  if (activeUrl !== requestUrl) throw new Error("对话已切换，请重新获取图片。");
+  return items.map((item) => ({ ...item }));
 }
 
 let downloadScanTask: Promise<void> | undefined;
+let downloadScanForUrl = "";
 async function scanDownloadImages(automatic = false) {
-  if (downloadScanTask) return downloadScanTask;
+  const tab = await getActiveChatTab();
+  const requestUrl = tab?.url ? sourceUrlFromTab(tab.url) : "";
+  if (downloadScanTask && downloadScanForUrl === requestUrl) return downloadScanTask;
+  downloadScanForUrl = requestUrl;
   downloadScanTask = (async () => {
     scanningDownload = true;
     scanDownloadBtn.disabled = true;
     if (!automatic) setStatus("正在获取当前对话图片…");
     try {
-      downloadImages = await extractChatImages();
+      const items = await extractChatImages();
+      const live = await getActiveChatTab();
+      const liveUrl = live?.url ? sourceUrlFromTab(live.url) : "";
+      if (liveUrl !== requestUrl) return;
+      downloadImages = items;
       downloadScanned = true;
       renderDownloadImages();
       setPreview(namingPreview(prefixEl.value, picked(downloadImages).length));
       setStatus(`已获取 ${downloadImages.length} 张，默认全选，可拖拽排序后打包。`);
     } catch (error) {
+      const live = await getActiveChatTab();
+      const liveUrl = live?.url ? sourceUrlFromTab(live.url) : "";
+      if (liveUrl !== requestUrl) return;
+      downloadImages = [];
+      downloadScanned = false;
       renderDownloadImages();
       const msg = error instanceof Error ? error.message : String(error);
       if (!automatic) setStatus(msg, "err");
-      else setStatus(msg === "请先打开豆包对话页。" ? "打开豆包对话后会自动获取图片。" : msg);
+      else setStatus(msg === "请先打开豆包或 ChatGPT 对话页。" ? "打开豆包 / ChatGPT 对话后会自动获取图片。" : msg);
     } finally {
       scanningDownload = false;
       scanDownloadBtn.disabled = false;
     }
-  })();
-  try { await downloadScanTask; }
-  finally { downloadScanTask = undefined; }
+  })().finally(() => {
+    if (downloadScanForUrl === requestUrl) {
+      downloadScanTask = undefined;
+      downloadScanForUrl = "";
+    }
+  });
+  return downloadScanTask;
 }
 
 async function startRunJob(
@@ -547,13 +595,13 @@ runBtn.addEventListener("click", () => {
     appendLog(`打包 prefix=${prefix}`);
     await paint();
 
-    const tab = await getActiveDoubaoTab();
-    if (!tab?.id) {
-      setStatus("请先打开 doubao.com 对话页，再点扩展图标。", "err");
-      appendLog("当前标签不是豆包页面");
+    const tab = await getActiveChatTab();
+    if (!tab?.id || !isSupportedChatUrl(tab.url || "")) {
+      setStatus("请先打开豆包或 ChatGPT 对话页，再点扩展图标。", "err");
+      appendLog("当前标签不是支持的对话页");
       applyProgress({
         phase: "error",
-        message: "当前不是豆包对话页",
+        message: "当前不是支持的对话页",
         percent: 0,
       });
       runBtn.disabled = false;
@@ -872,7 +920,9 @@ async function readClipboard(automatic = false) {
 function draftKeyFromUrl(url: string): string {
   try {
     const path = new URL(url).pathname;
-    if (/\/chat\/\d+/.test(path)) return `doubao_content_draft:${path}`;
+    if (/\/chat\/\d+/.test(path) || /^\/c\/[0-9a-f-]{16,}$/i.test(path)) {
+      return `doubao_content_draft:${path}`;
+    }
   } catch { /* ignore */ }
   return "doubao_content_draft:general";
 }
@@ -942,13 +992,17 @@ async function bindActiveChat(options: { rescan?: boolean; silent?: boolean } = 
   draftKey = nextKey;
   editVersion++;
   const stored = await browser.storage.local.get([draftKey, CHAT_SUBMITS_KEY]);
+  const forceRescan = options.rescan !== false;
   if (stored[draftKey]) {
     const saved = stored[draftKey] as ContentDraft;
+    // 切会话时先丢掉旧图，避免 SPA 残留 / 串会话草稿继续展示
     draft = {
       contents: saved.contents ?? "",
       reply_words: saved.reply_words ?? "",
-      images: (saved.images ?? []).map((item) => ({ ...item, selected: item.selected !== false })),
-      scanned: !!saved.scanned,
+      images: forceRescan
+        ? []
+        : (saved.images ?? []).map((item) => ({ ...item, selected: item.selected !== false })),
+      scanned: forceRescan ? false : !!saved.scanned,
     };
   } else {
     draft = { contents: "", reply_words: "", images: [], scanned: false };
@@ -966,9 +1020,11 @@ async function bindActiveChat(options: { rescan?: boolean; silent?: boolean } = 
   if (composeOpened) {
     const id = chatIdFromKey(chatSubmitKey(sourceUrl));
     if (!options.silent) {
-      composeStatus.textContent = id ? `已切换到对话 ${id}，正在同步…` : "当前不是豆包对话页。";
+      composeStatus.textContent = id
+        ? `已切换到对话 ${id.slice(0, 8)}${id.length > 8 ? "…" : ""}，正在同步…`
+        : "当前不是豆包 / ChatGPT 对话页。";
     }
-    if (options.rescan !== false && id) void scanImages();
+    if (forceRescan && id) void scanImages();
   }
   return true;
 }
@@ -978,24 +1034,47 @@ function scheduleBindActiveChat(options?: { rescan?: boolean; silent?: boolean }
   return bindQueue;
 }
 
+let composeScanForUrl = "";
 async function scanImages() {
-  if (scanningImages) return;
+  const tabHint = await getActiveChatTab();
+  const requestUrl = tabHint?.url ? sourceUrlFromTab(tabHint.url) : "";
+  if (scanningImages && composeScanForUrl === requestUrl) return;
   scanningImages = true;
+  composeScanForUrl = requestUrl;
   submitBtn.disabled = true;
   scanBtn.disabled = true;
   composeStatus.textContent = "正在获取当前对话图片…";
   try {
     await scheduleBindActiveChat({ rescan: false, silent: true });
-    const tab = await getActiveDoubaoTab();
-    if (!tab?.id || !/\/chat\/\d+/.test(new URL(tab.url!).pathname)) throw new Error("请先打开豆包对话页。");
-    draft.images = await extractChatImages();
+    const tab = await getActiveChatTab();
+    if (!tab?.id || !isSupportedChatUrl(tab.url!)) throw new Error("请先打开豆包或 ChatGPT 对话页。");
+    const liveUrl = sourceUrlFromTab(tab.url!);
+    if (requestUrl && liveUrl !== requestUrl) return;
+    const items = await extractChatImages();
+    const still = await getActiveChatTab();
+    const stillUrl = still?.url ? sourceUrlFromTab(still.url) : "";
+    if (requestUrl && stillUrl !== requestUrl) return;
+    draft.images = items;
     draft.scanned = true;
     renderImages();
     await saveDraft();
     composeStatus.textContent = `已获取 ${draft.images.length} 张图片，默认全选；取消勾选则不上传。`;
   } catch (error) {
+    const still = await getActiveChatTab();
+    const stillUrl = still?.url ? sourceUrlFromTab(still.url) : "";
+    if (requestUrl && stillUrl !== requestUrl) return;
+    draft.images = [];
+    draft.scanned = false;
+    renderImages();
     composeStatus.textContent = error instanceof Error ? error.message : String(error);
-  } finally { scanBtn.disabled = false; scanningImages = false; submitBtn.disabled = false; }
+  } finally {
+    if (composeScanForUrl === requestUrl) {
+      scanningImages = false;
+      composeScanForUrl = "";
+    }
+    scanBtn.disabled = false;
+    submitBtn.disabled = false;
+  }
 }
 
 const editorReady = scheduleBindActiveChat({ rescan: false, silent: true });

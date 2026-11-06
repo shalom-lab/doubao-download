@@ -103,7 +103,7 @@ const background = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
    assert.equal(puts.filter(p => p.file.includes('/Images/')).length, 2);
    assert.equal(puts.filter(p => p.file === jsonPath).length, 2);
    const md = remote.get(jsonPath.replace(/\.json$/, '.md')).content.toString('utf8');
-   assert(md.includes('## Reply Words\n\n回复词')); assert(md.includes('## Images'));
+   assert(md.includes('## Reply Words\n\n回复词')); assert(md.startsWith('<table>')); assert(md.indexOf('</table>') < md.indexOf('# Prompts')); assert(md.includes('height="240"'));
    assert(auth.every(a => a === 'Bearer fake-test-token')); assert(imageAuth.every(a => a === undefined));
    await page.locator('#submit-content').click();
    await page.waitForFunction(() => document.querySelector('#compose-status').textContent.includes('相同内容已上传'));

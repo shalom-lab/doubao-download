@@ -12,6 +12,8 @@ export default defineConfig({
       "https://doubao.com/*",
       "https://*.doubao.com/*",
       "https://*.byteimg.com/*",
+      "https://chatgpt.com/*",
+      "https://*.chatgpt.com/*",
       "https://api.github.com/*",
     ],
     action: {

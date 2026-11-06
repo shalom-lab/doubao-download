@@ -15,25 +15,60 @@ export function validateInput(input: UploadInput) {
   if (input.images.length > 200) throw new Error("单次最多上传 200 张图片");
   for (const image of input.images) {
     const url = new URL(image.url);
-    if (url.protocol !== "https:" || !url.hostname.endsWith(".byteimg.com") || url.username || url.password) throw new Error("仅支持豆包 byteimg 图片地址");
+    const host = url.hostname.toLowerCase();
+    const okHost =
+      host.endsWith(".byteimg.com") ||
+      host === "chatgpt.com" ||
+      host.endsWith(".chatgpt.com");
+    if (url.protocol !== "https:" || !okHost || url.username || url.password) {
+      throw new Error("仅支持豆包 byteimg 或 ChatGPT 图片地址");
+    }
   }
   if (input.url) {
     const url = new URL(input.url);
-    if (url.protocol !== "https:" || !(url.hostname === "doubao.com" || url.hostname.endsWith(".doubao.com"))) throw new Error("来源链接必须为豆包页面");
+    const host = url.hostname.toLowerCase();
+    const okSource =
+      host === "doubao.com" ||
+      host.endsWith(".doubao.com") ||
+      host === "chatgpt.com" ||
+      host.endsWith(".chatgpt.com");
+    if (url.protocol !== "https:" || !okSource) throw new Error("来源链接必须为豆包或 ChatGPT 页面");
   }
 }
 
 export function makeRecord(input: UploadInput, paths: string[], savedAt: string) {
   return { category: CATEGORY, url: input.url.trim(), content: input.contents.trim(), notes: "", reply_words: input.reply_words.trim(), image: paths[0] || "", images: paths, savedAt };
 }
+const IMAGE_ROW_SIZE = 5;
+
+function imageCell(path: string) {
+  const file = path.split("/").pop() || path;
+  const alt = file.replace(/\.[^.]+$/, "").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const href = path.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return `<td><a href="${href}"><img src="${href}" height="240" alt="${alt}"></a></td>`;
+}
+
+function imageTable(rows: string[][]) {
+  return `<table>\n${rows.map((row) => `<tr>\n${row.map(imageCell).join("\n")}\n</tr>`).join("\n")}\n</table>`;
+}
+
+function markdownImageRows(image: string, images: string[]) {
+  const ordered = images.filter((path) => path && path !== image);
+  if (image) ordered.unshift(image);
+  const rows: string[][] = [];
+  for (let i = 0; i < ordered.length; i += IMAGE_ROW_SIZE) rows.push(ordered.slice(i, i + IMAGE_ROW_SIZE));
+  return rows;
+}
+
 export function makeMarkdown(record: ReturnType<typeof makeRecord>) {
-  const lines = [`# ${CATEGORY}`, ""];
+  const lines: string[] = [];
+  const rows = markdownImageRows(record.image, record.images);
+  if (rows.length) lines.push(imageTable(rows), "");
+  lines.push(`# ${CATEGORY}`, "");
   if (record.content) lines.push(`- **Category:** ${CATEGORY}`);
   lines.push(`- **Source URL:** ${record.url || "-"}`);
-  if (record.image) lines.push(`- **Image:** ![](${record.image})`);
   lines.push(`- **Saved At:** ${record.savedAt}`, "");
   if (record.content) lines.push("---", "", "## Content", "", record.content, "");
-  if (record.images.length > 1) lines.push("## Images", "", ...record.images.flatMap((path) => [`![](${path})`, ""]));
   if (record.reply_words) {
     if (!record.content) lines.push("---", "");
     lines.push("## Reply Words", "", record.reply_words, "");

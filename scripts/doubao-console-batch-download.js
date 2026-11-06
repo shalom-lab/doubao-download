@@ -26,19 +26,28 @@
   function normalizeUrl(raw) {
     return raw.replace(/\\u002F/g, "/").replace(/\\\//g, "/");
   }
+  const RAW_TPL_RE =
+    /image_raw(?:_b)?(?:_[a-z0-9]+)*(?::[^?=]+)?=\.(?:png|jpe?g)|image_raw(?:_b)?\.(?:png|jpe?g)/i;
+  const DLD_TPL_RE =
+    /(?:image_dld_watermark[^~?]*|cdld_wm\d+)\.(?:png|jpe?g)|cgen_lwm\d*(?:_[a-z0-9]+)*(?::[^?=]+)?=\.(?:png|jpe?g)/i;
+  const PREVIEW_TPL_RE =
+    /cpreview_wm\d+\.(?:png|jpe?g)|cgen_wm\d*(?:_[a-z0-9]+)*(?::[^?=]+)?=\.(?:png|jpe?g)|cthumb(?:_[a-z0-9]+)*(?::[^?=]+)?=\.(?:png|jpe?g)/i;
   function classifyQuality(u) {
     if (!u || NOISE_RE.test(u) || /\.heic(\?|$)/i.test(u)) return null;
     if (!/byteimg\.com/i.test(u) || !/~tplv-/i.test(u)) return null;
-    if (/image_raw(_b)?\.(png|jpe?g)/i.test(u)) return "raw";
-    if (/(image_dld_watermark[^~?]*|cdld_wm\d+)\.(png|jpe?g)/i.test(u)) return "dld";
-    if (/cpreview_wm\d+\.(png|jpe?g)/i.test(u)) return "cpreview";
+    if (RAW_TPL_RE.test(u)) return "raw";
+    if (DLD_TPL_RE.test(u)) return "dld";
+    if (PREVIEW_TPL_RE.test(u)) return "cpreview";
     return null;
   }
   function scoreVariant(u, q) {
     let s = 0;
     if (/\.png(\?|$)/i.test(u)) s += 10;
-    if (q === "cpreview" && /cpreview_wm0/i.test(u)) s += 8;
-    else if (q === "cpreview" && /cpreview_wm1/i.test(u)) s += 2;
+    if (q === "cpreview" && /cpreview_wm0|cgen_wm0/i.test(u)) s += 8;
+    else if (q === "cpreview" && /cpreview_wm1|cgen_wm1/i.test(u)) s += 2;
+    else if (q === "cpreview" && /cthumb/i.test(u)) s -= 4;
+    if (q === "raw" && /image_raw/i.test(u) && /\.png(\?|$)/i.test(u)) s += 6;
+    if (q === "dld" && /cdld_wm|image_dld|cgen_lwm/i.test(u) && /\.png(\?|$)/i.test(u)) s += 6;
     return s;
   }
   function putVariant(bag, u) {
@@ -114,7 +123,30 @@
   for (const root of scopes) {
     for (const img of root.querySelectorAll("img")) {
       if (isSidebar(img)) continue;
-      harvestString(img.currentSrc || img.src, bag);
+      const current = img.currentSrc || "";
+      const attrSrc = img.getAttribute("src") || "";
+      if (current) harvestString(current, bag);
+      if (attrSrc && attrSrc !== current) harvestString(attrSrc, bag);
+      harvestString(img.getAttribute("srcset"), bag);
+    }
+    for (const source of root.querySelectorAll("source")) {
+      if (isSidebar(source)) continue;
+      harvestString(source.getAttribute("srcset"), bag);
+      harvestString(source.getAttribute("src"), bag);
+    }
+    for (const el of root.querySelectorAll('[data-testid="mdbox_image"]')) {
+      if (isSidebar(el)) continue;
+      let fiber = findReactFiber(el);
+      for (let i = 0; i < 16 && fiber; i++) {
+        const ic = fiber.memoizedProps && fiber.memoizedProps.imageContent;
+        if (!ic) { fiber = fiber.return; continue; }
+        harvestString(ic.image_ori_raw && ic.image_ori_raw.url, bag);
+        harvestString(ic.image_ori && ic.image_ori.url, bag);
+        harvestString(ic.image_preview && ic.image_preview.url, bag);
+        harvestString(ic.image_preview_resize && ic.image_preview_resize.url, bag);
+        harvestString(ic.image_thumb && ic.image_thumb.url, bag);
+        break;
+      }
     }
     try { harvestString(root.innerHTML, bag); } catch (_) {}
     bfsFiberSubtree(root, bag);

@@ -23,7 +23,7 @@ WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+S
     └── …
 ```
 
-自动取最清晰一档：`image_raw*` → 官方保存 `image_dld*` / `cdld_wm*` → 预览 `cpreview_wm*`。只认当前会话消息区 / 大图预览里的 `byteimg.com` + `~tplv`，不扫对话列表、不吃 `performance` 残留。
+自动取最清晰一档：`image_raw*`（含新版 `image_raw_hflow`）→ 官方保存 `image_dld*` / `cdld_wm*` / `cgen_lwm*` → 预览 `cpreview_wm*` / `cgen_wm*`。只认当前会话消息区 / 大图预览里的 `byteimg.com` + `~tplv`，不扫对话列表、不吃 `performance` 残留。
 
 打开侧边栏会自动获取当前对话缩略图（也可点「获取图片」）。默认全选，可 **全选 / 全不选**。点图片主体勾选或取消；右上角小方块同样可用。悬停后左下角出现放大按钮。拖拽调整顺序后，ZIP 内文件名按勾选后的顺序编号（`0001-01` 起）；拉图仍并行。
 
@@ -101,7 +101,7 @@ npm run zip       # → .output/doubao-download-*-chrome.zip
 - 图片：`infoflow-data/Images/Prompts/{同一标识}-{从0开始的序号}.{实际格式}`。
 - `category` 固定为 `Prompts`；`contents` 写入 `content`，`reply_words` 独立保存；`notes` 为空，`url` 是采集时的豆包对话链接。
 - `image` 为排序后的第一张，`images` 保持勾选后的编辑顺序，使用 `../Images/Prompts/…` 相对路径。无图片时分别为 `""` 和 `[]`。
-- JSON 使用 UTF-8 和两个空格缩进。Markdown 输出 `Content`、多图时的 `Images`、有回复词时的 `Reply Words`。
+- JSON 使用 UTF-8 和两个空格缩进。Markdown 最顶端只放 `images` 表格，每行 5 张、高度 240；`image` 与 `images` 第一张相同，排在表格第一格。下面才是标题、`Content` 和有回复词时的 `Reply Words`。
 - 首次入队时固定文件标识和 `savedAt`；图片处理结果缓存到 IndexedDB，全部准备好后先传图片，再传 JSON 和 Markdown。每个文件成功后保存进度，重试查询 SHA 并使用原路径。
 - 「上传任务」进度为勾选图片张数，例如 `12/12 张`，不含 JSON / Markdown。列表可纵向滚动。
 - 未完成任务会一直留在列表里（排队 / 失败可重试）。已完成的只保留最近 10 条，更早的会从本地队列删掉；重复提交去重也只对照这 10 条。

@@ -5,9 +5,25 @@
 import {
   extractHdImages,
   sanitizePrefix,
-  getCurrentChatId,
+  getCurrentChatId as getDoubaoChatId,
 } from "../utils/extract-hd";
+import { extractChatGptImages, getChatGptConversationId } from "../utils/extract-chatgpt";
+import { detectChatSite } from "../utils/site";
 import { downloadImagesAsZip } from "../utils/zip-download";
+
+function getCurrentChatId(): string | null {
+  const site = detectChatSite();
+  if (site === "chatgpt") return getChatGptConversationId();
+  return getDoubaoChatId();
+}
+
+async function extractImagesForSite(
+  prefix: string,
+  onTick?: Parameters<typeof extractHdImages>[1]
+) {
+  if (detectChatSite() === "chatgpt") return extractChatGptImages(prefix, onTick);
+  return extractHdImages(prefix, onTick);
+}
 
 export type ProgressPhase =
   | "idle"
@@ -88,7 +104,7 @@ export default defineUnlistedScript(() => {
   };
 
   const api: DoubaoHdApi = {
-    extractImages: extractHdImages,
+    extractImages: extractImagesForSite,
     logs,
     progress: { phase: "idle", message: "就绪" },
     running: false,
@@ -148,7 +164,7 @@ export default defineUnlistedScript(() => {
             `开始打包… prefix=${prefix} chatId=${chatId || "?"}（仅当前会话·最清晰）`
           );
           items = numbered(
-            await extractHdImages(prefix, (t) => {
+            await extractImagesForSite(prefix, (t) => {
               setProgress({
                 phase: "scan",
                 message: t.message,

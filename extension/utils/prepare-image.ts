@@ -50,7 +50,14 @@ export async function prepareImage(blob: Blob, name: string, convertToJpeg = tru
 }
 
 export async function fetchPreparedImage(item: { url: string; name: string }, convertToJpeg = true): Promise<PreparedImage> {
-  const response = await fetch(item.url, { credentials: "omit", mode: "cors", signal: AbortSignal.timeout(60_000) });
+  const chatgpt = /(?:^https:\/\/(?:[\w-]+\.)?chatgpt\.com\/)/i.test(item.url);
+  const response = await fetch(item.url, {
+    // ChatGPT estuary 签名 URL 仍要带站点 cookie；豆包 byteimg 保持 omit。
+    credentials: chatgpt ? "include" : "omit",
+    mode: "cors",
+    signal: AbortSignal.timeout(60_000),
+    headers: chatgpt ? { "X-OpenAI-Attach-Auth": "1" } : undefined,
+  });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return prepareImage(await response.blob(), item.name, convertToJpeg);
 }

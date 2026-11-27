@@ -10,6 +10,22 @@ import {
 import { extractChatGptImages, getChatGptConversationId } from "../utils/extract-chatgpt";
 import { detectChatSite } from "../utils/site";
 import { downloadImagesAsZip } from "../utils/zip-download";
+import {
+  clearPromptBag,
+  conversationFileStem,
+  exportConversation,
+  exportPromptFileStem,
+  exportPromptsMarkdown,
+  extractCurrentConversation,
+  getPromptWatchSnapshot,
+  listConversations,
+  listCurrentPrompts,
+  messagesToMarkdown,
+  promptsToMarkdown,
+  refreshCurrentPrompts,
+  startPromptWatch,
+  stopPromptWatch,
+} from "../utils/extract-chat-export";
 
 function getCurrentChatId(): string | null {
   const site = detectChatSite();
@@ -58,6 +74,20 @@ export type DoubaoHdRunResult = {
 
 export type DoubaoHdApi = {
   extractImages: typeof extractHdImages;
+  listConversations: typeof listConversations;
+  listCurrentPrompts: typeof listCurrentPrompts;
+  refreshCurrentPrompts: typeof refreshCurrentPrompts;
+  clearPromptBag: typeof clearPromptBag;
+  startPromptWatch: typeof startPromptWatch;
+  stopPromptWatch: typeof stopPromptWatch;
+  getPromptWatchSnapshot: typeof getPromptWatchSnapshot;
+  exportPromptsMarkdown: typeof exportPromptsMarkdown;
+  exportPromptFileStem: typeof exportPromptFileStem;
+  promptsToMarkdown: typeof promptsToMarkdown;
+  extractCurrentConversation: typeof extractCurrentConversation;
+  exportConversation: typeof exportConversation;
+  messagesToMarkdown: typeof messagesToMarkdown;
+  conversationFileStem: typeof conversationFileStem;
   logs: string[];
   progress: DoubaoHdProgress;
   running: boolean;
@@ -86,8 +116,24 @@ declare global {
 }
 
 export default defineUnlistedScript(() => {
-  if (window.__DOUBAO_HD__) {
-    console.log("[doubao-hd] MAIN world api already installed");
+  const existing = window.__DOUBAO_HD__;
+  if (existing) {
+    existing.extractImages = extractImagesForSite;
+    existing.listConversations = listConversations;
+    existing.listCurrentPrompts = listCurrentPrompts;
+    existing.refreshCurrentPrompts = refreshCurrentPrompts;
+    existing.clearPromptBag = clearPromptBag;
+    existing.startPromptWatch = startPromptWatch;
+    existing.stopPromptWatch = stopPromptWatch;
+    existing.getPromptWatchSnapshot = getPromptWatchSnapshot;
+    existing.exportPromptsMarkdown = exportPromptsMarkdown;
+    existing.exportPromptFileStem = exportPromptFileStem;
+    existing.promptsToMarkdown = promptsToMarkdown;
+    existing.extractCurrentConversation = extractCurrentConversation;
+    existing.exportConversation = exportConversation;
+    existing.messagesToMarkdown = messagesToMarkdown;
+    existing.conversationFileStem = conversationFileStem;
+    console.log("[doubao-hd] MAIN world api upgraded", location.href);
     return;
   }
 
@@ -105,6 +151,20 @@ export default defineUnlistedScript(() => {
 
   const api: DoubaoHdApi = {
     extractImages: extractImagesForSite,
+    listConversations,
+    listCurrentPrompts,
+    refreshCurrentPrompts,
+    clearPromptBag,
+    startPromptWatch,
+    stopPromptWatch,
+    getPromptWatchSnapshot,
+    exportPromptsMarkdown,
+    exportPromptFileStem,
+    promptsToMarkdown,
+    extractCurrentConversation,
+    exportConversation,
+    messagesToMarkdown,
+    conversationFileStem,
     logs,
     progress: { phase: "idle", message: "就绪" },
     running: false,

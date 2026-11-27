@@ -1,6 +1,26 @@
 import { sanitizePrefix } from "../../utils/extract-hd";
 import { CHAT_SUBMITS_KEY, chatIdFromKey, chatSubmitKey, type ChatSubmitMap } from "../../utils/chat-submit";
-import { isSupportedChatUrl } from "../../utils/site";
+import { chatIdFromUrl, isSupportedChatUrl } from "../../utils/site";
+import {
+  exportPromptTurnsMarkdown,
+  mergePromptTurns,
+  type PromptListResult,
+  type PromptTurn,
+} from "../../utils/extract-chat-export";
+
+const EXPORT_CACHE_KEY = "doubao_export_prompt_cache";
+
+type ExportCacheEntry = {
+  conversationId: string;
+  name: string;
+  url: string;
+  hasMore: boolean;
+  prompts: PromptTurn[];
+  selectedIds: string[];
+  updatedAt: number;
+};
+
+type ExportCacheStore = Record<string, ExportCacheEntry>;
 
 const PREFIX_KEY = "doubao_hd_prefix";
 const JPEG_KEY = "doubao_convert_jpeg";
@@ -1026,7 +1046,16 @@ async function bindActiveChat(options: { rescan?: boolean; silent?: boolean } = 
     }
     if (forceRescan && id) void scanImages();
   }
+  // 聊天导出 Tab：会话切换时自动跟随并执行「获取提问」
+  if (isExportPanelOpen() && forceRescan) {
+    void followExportConversationSwitch(sourceUrl);
+  }
   return true;
+}
+
+function isExportPanelOpen() {
+  const panel = document.getElementById("panel-export");
+  return Boolean(panel && !panel.hidden);
 }
 
 function scheduleBindActiveChat(options?: { rescan?: boolean; silent?: boolean }) {
@@ -1107,6 +1136,23 @@ for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
         void readClipboard(true);
         if (!draft.scanned) void scanImages();
         else void scheduleBindActiveChat({ rescan: false, silent: true });
+      }
+      if (tab.dataset.tab === "export") {
+        void (async () => {
+          const chat = await getActiveChatTab();
+          if (chat?.id && isDoubaoChatTab(chat.url) && isSupportedChatUrl(chat.url!)) {
+            try {
+              await ensureExportPromptWatch(chat.id);
+            } catch {
+              // fall through to scan
+            }
+            void followExportConversationSwitch(chat.url!);
+          } else {
+            void scanExportPrompts({ reason: "open" });
+          }
+        })();
+      } else {
+        stopExportPromptWatch();
       }
     } catch { composeStatus.textContent = "初始化失败，请重新打开扩展。"; }
   });
@@ -1343,3 +1389,636 @@ function renderChatSubmits(map: ChatSubmitMap) {
   const when = Number.isNaN(last.getTime()) ? "" : ` · 最近 ${last.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
   el.textContent = `对话 ${id} · 已提交 ${row.count} 次${when}`;
 }
+
+type ExportPromptRow = PromptTurn & { selected: boolean };
+
+const exportChatList = document.getElementById("export-chat-list")!;
+const exportChatCount = document.getElementById("export-chat-count")!;
+const exportChatTitle = document.getElementById("export-chat-title")!;
+const exportStatus = document.getElementById("export-status")!;
+const exportBtn = document.getElementById("export-chats") as HTMLButtonElement;
+const scanChatsBtn = document.getElementById("scan-chats") as HTMLButtonElement;
+let exportPrompts: ExportPromptRow[] = [];
+let exportMeta: Pick<PromptListResult, "conversationId" | "name" | "url" | "hasMore"> | null = null;
+let exportAnchorIndex = -1;
+let exportingChats = false;
+let exportWatchTimer: ReturnType<typeof setInterval> | null = null;
+let exportWatchRevision = 0;
+let exportWatchTabId: number | null = null;
+let exportCacheTimer: ReturnType<typeof setTimeout> | null = null;
+let exportCacheWrite: Promise<void> = Promise.resolve();
+let scanningExport = false;
+let exportScanForChatId = "";
+let exportFollowChatId = "";
+const exportClearCurrentBtn = document.getElementById("export-clear-current") as HTMLButtonElement;
+const exportClearAllBtn = document.getElementById("export-clear-all") as HTMLButtonElement;
+
+async function readExportCacheStore(): Promise<ExportCacheStore> {
+  const stored = await browser.storage.local.get(EXPORT_CACHE_KEY);
+  const raw = stored[EXPORT_CACHE_KEY];
+  return raw && typeof raw === "object" ? (raw as ExportCacheStore) : {};
+}
+
+async function writeExportCacheStore(store: ExportCacheStore) {
+  await browser.storage.local.set({ [EXPORT_CACHE_KEY]: store });
+}
+
+function exportCacheEntryFromUi(): ExportCacheEntry | null {
+  if (!exportMeta?.conversationId) return null;
+  return {
+    conversationId: exportMeta.conversationId,
+    name: exportMeta.name,
+    url: exportMeta.url,
+    hasMore: exportMeta.hasMore,
+    prompts: exportPrompts.map(({ selected: _selected, ...rest }) => rest),
+    selectedIds: exportPrompts.filter((row) => row.selected).map((row) => row.id),
+    updatedAt: Date.now(),
+  };
+}
+
+async function persistExportCacheNow() {
+  const entry = exportCacheEntryFromUi();
+  if (!entry) return;
+  exportCacheWrite = exportCacheWrite
+    .catch(() => {})
+    .then(async () => {
+      const store = await readExportCacheStore();
+      store[entry.conversationId] = entry;
+      await writeExportCacheStore(store);
+    });
+  await exportCacheWrite;
+}
+
+function schedulePersistExportCache() {
+  if (exportCacheTimer) clearTimeout(exportCacheTimer);
+  exportCacheTimer = setTimeout(() => {
+    exportCacheTimer = null;
+    void persistExportCacheNow().catch(() => {
+      setExportStatus("提问缓存保存失败（可能空间不足），可清空部分会话。", "err");
+    });
+  }, 450);
+}
+
+async function loadExportCacheEntry(conversationId: string): Promise<ExportCacheEntry | null> {
+  if (!conversationId) return null;
+  const store = await readExportCacheStore();
+  return store[conversationId] || null;
+}
+
+async function clearPagePromptBag(conversationId?: string) {
+  try {
+    const tab = await getActiveChatTab();
+    if (!tab?.id || !isDoubaoChatTab(tab.url)) return;
+    await ensureMainWorld(tab.id);
+    await browser.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "MAIN",
+      func: (id?: string) => {
+        const api = (
+          window as unknown as {
+            __DOUBAO_HD__?: { clearPromptBag: (conversationId?: string) => void };
+          }
+        ).__DOUBAO_HD__;
+        api?.clearPromptBag?.(id);
+      },
+      args: [conversationId],
+    });
+  } catch {
+    // ignore
+  }
+}
+
+function isDoubaoChatTab(url?: string) {
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "doubao.com" || host.endsWith(".doubao.com");
+  } catch {
+    return false;
+  }
+}
+
+function setExportStatus(text: string, kind: "" | "ok" | "err" = "") {
+  exportStatus.textContent = text;
+  exportStatus.className = `status${kind ? ` ${kind}` : ""}`;
+}
+
+function selectedExportPrompts() {
+  return exportPrompts.filter((row) => row.selected);
+}
+
+function refreshExportCount() {
+  const selected = selectedExportPrompts().length;
+  exportChatCount.textContent = exportPrompts.length
+    ? `${selected}/${exportPrompts.length}`
+    : "0";
+  exportBtn.disabled = exportingChats || selected === 0;
+}
+
+function previewPrompt(text: string) {
+  return text.replace(/\s+/g, " ").trim().slice(0, 72) || "(空提问)";
+}
+
+/** createTime 为秒级时间戳。 */
+function formatPromptTime(createTime?: number) {
+  if (!createTime) return "";
+  const d = new Date(createTime * 1000);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDurationSec(sec: number) {
+  if (sec < 60) return `${sec}秒`;
+  if (sec < 3600) return `${Math.round(sec / 60)}分钟`;
+  if (sec < 86400) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.round((sec % 3600) / 60);
+    return m ? `${h}小时${m}分` : `${h}小时`;
+  }
+  const days = Math.floor(sec / 86400);
+  const h = Math.round((sec % 86400) / 3600);
+  return h ? `${days}天${h}小时` : `${days}天`;
+}
+
+/** 相邻提问时间差过大时提示可能漏滚了中间段（虚拟列表未加载）。 */
+const PROMPT_GAP_WARN_SEC = 30 * 60;
+
+function promptGapSec(prev?: ExportPromptRow, next?: ExportPromptRow) {
+  if (!prev?.createTime || !next?.createTime) return 0;
+  return Math.max(0, next.createTime - prev.createTime);
+}
+
+function exportTimeSummary(rows: ExportPromptRow[]) {
+  const timed = rows.filter((r) => r.createTime);
+  if (!timed.length) return "";
+  const first = timed[0]!;
+  const last = timed[timed.length - 1]!;
+  let gaps = 0;
+  for (let i = 1; i < timed.length; i++) {
+    if (promptGapSec(timed[i - 1], timed[i]) >= PROMPT_GAP_WARN_SEC) gaps += 1;
+  }
+  const span = `${formatPromptTime(first.createTime)} → ${formatPromptTime(last.createTime)}`;
+  return gaps
+    ? `${span} · ${gaps} 处时间跨度偏大（中间可能未滚到）`
+    : span;
+}
+
+async function applyExportPromptResult(
+  result: PromptListResult,
+  opts?: { status?: string; kind?: "" | "ok" | "err" }
+) {
+  if (!result?.conversationId) return;
+  const sameConversation = exportMeta?.conversationId === result.conversationId;
+  if (exportMeta?.conversationId && !sameConversation) {
+    await persistExportCacheNow().catch(() => {});
+  }
+
+  const selection = new Map<string, boolean>();
+  let base: PromptTurn[] = [];
+  if (sameConversation) {
+    for (const row of exportPrompts) selection.set(row.id, row.selected);
+    base = exportPrompts.map(({ selected: _s, ...rest }) => rest);
+  } else {
+    const cached = await loadExportCacheEntry(result.conversationId);
+    if (cached?.prompts?.length) base = cached.prompts;
+    for (const id of cached?.selectedIds || []) selection.set(id, true);
+    exportAnchorIndex = -1;
+  }
+
+  const merged = mergePromptTurns(base, result.prompts || []);
+  exportMeta = {
+    conversationId: result.conversationId,
+    name: result.name || exportMeta?.name || result.conversationId,
+    url: result.url || exportMeta?.url || "",
+    hasMore: Boolean(result.hasMore),
+  };
+  exportPrompts = merged.map((item) => ({
+    ...item,
+    selected: selection.get(item.id) ?? false,
+  }));
+  renderExportPrompts();
+  schedulePersistExportCache();
+  if (opts?.status) setExportStatus(opts.status, opts.kind ?? "");
+}
+
+function stopExportPromptWatch() {
+  if (exportWatchTimer) {
+    clearInterval(exportWatchTimer);
+    exportWatchTimer = null;
+  }
+  exportWatchTabId = null;
+}
+
+async function ensureExportPromptWatch(tabId: number) {
+  await ensureMainWorld(tabId);
+  await browser.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: () => {
+      const api = (
+        window as unknown as {
+          __DOUBAO_HD__?: {
+            startPromptWatch: (opts?: { debounceMs?: number; maxWaitMs?: number }) => unknown;
+          };
+        }
+      ).__DOUBAO_HD__;
+      if (!api?.startPromptWatch) throw new Error("请刷新豆包页面后重试。");
+      // 停滚约 350ms 合并一次；连续狂滚最多约 0.8s 强制入库，降低漏采窗口
+      return api.startPromptWatch({ debounceMs: 350, maxWaitMs: 800 });
+    },
+  });
+  exportWatchTabId = tabId;
+  if (exportWatchTimer) return;
+  exportWatchTimer = setInterval(() => {
+    void pollExportPromptWatch();
+  }, 700);
+}
+
+async function restoreExportCacheForChat(conversationId: string) {
+  if (!conversationId || exportMeta?.conversationId === conversationId) return false;
+  await persistExportCacheNow().catch(() => {});
+  const cached = await loadExportCacheEntry(conversationId);
+  exportAnchorIndex = -1;
+  if (!cached) {
+    exportMeta = {
+      conversationId,
+      name: conversationId,
+      url: `https://www.doubao.com/chat/${conversationId}`,
+      hasMore: true,
+    };
+    exportPrompts = [];
+    renderExportPrompts();
+    return false;
+  }
+  exportMeta = {
+    conversationId: cached.conversationId,
+    name: cached.name,
+    url: cached.url,
+    hasMore: cached.hasMore,
+  };
+  const selected = new Set(cached.selectedIds || []);
+  exportPrompts = (cached.prompts || []).map((item) => ({
+    ...item,
+    selected: selected.has(item.id),
+  }));
+  renderExportPrompts();
+  return exportPrompts.length > 0;
+}
+
+/** 会话切换自动跟随：先恢复该会话缓存，再等同点一次「获取提问」。 */
+async function followExportConversationSwitch(url: string) {
+  const chatId = chatIdFromUrl(url || "");
+  if (!chatId || !isDoubaoChatTab(url)) return;
+  if (exportFollowChatId === chatId && (scanningExport || exportMeta?.conversationId === chatId)) {
+    return;
+  }
+  exportFollowChatId = chatId;
+  const hadCache = await restoreExportCacheForChat(chatId);
+  setExportStatus(
+    hadCache
+      ? `已切换会话，已恢复缓存 ${exportPrompts.length} 条，正在自动获取…`
+      : "已切换会话，正在自动获取提问…",
+    hadCache ? "ok" : ""
+  );
+  await scanExportPrompts({ reason: "follow" });
+}
+
+async function pollExportPromptWatch() {
+  if (exportingChats || scanningExport) return;
+  if (!isExportPanelOpen()) return;
+  try {
+    const tab = await getActiveChatTab();
+    if (!tab?.id || !isDoubaoChatTab(tab.url) || !isSupportedChatUrl(tab.url!)) return;
+    const pageChatId = chatIdFromUrl(tab.url!);
+    // SPA 切会话时 tabs 事件偶发漏报：轮询发现会话变了就自动跟随获取
+    if (pageChatId && pageChatId !== exportMeta?.conversationId && pageChatId !== exportFollowChatId) {
+      await followExportConversationSwitch(tab.url!);
+      return;
+    }
+    if (exportWatchTabId !== tab.id) {
+      await ensureExportPromptWatch(tab.id);
+    }
+    const [injection] = await browser.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "MAIN",
+      func: () => {
+        const api = (
+          window as unknown as {
+            __DOUBAO_HD__?: {
+              getPromptWatchSnapshot: () => {
+                revision: number;
+                result: PromptListResult | null;
+              };
+            };
+          }
+        ).__DOUBAO_HD__;
+        return api?.getPromptWatchSnapshot?.() ?? null;
+      },
+    });
+    const snap = injection?.result as
+      | { revision: number; result: PromptListResult | null }
+      | null
+      | undefined;
+    if (!snap?.result) return;
+    const snapId = snap.result.conversationId;
+    if (snapId && exportMeta?.conversationId && snapId !== exportMeta.conversationId) {
+      await followExportConversationSwitch(
+        snap.result.url || `https://www.doubao.com/chat/${snapId}`
+      );
+      return;
+    }
+    if (snap.revision === exportWatchRevision) return;
+    exportWatchRevision = snap.revision;
+    await applyExportPromptResult(snap.result);
+    const summary = exportTimeSummary(exportPrompts);
+    setExportStatus(
+      summary
+        ? `当前 ${exportPrompts.length} 条 · ${summary}`
+        : `当前 ${exportPrompts.length} 条提问。`,
+      "ok"
+    );
+  } catch {
+    // 页面切换/未注入时静默，下次轮询再试
+  }
+}
+
+function renderExportPrompts() {
+  exportChatList.replaceChildren();
+  refreshExportCount();
+  if (exportMeta) {
+    exportChatTitle.textContent = `当前：${exportMeta.name}`;
+  } else {
+    exportChatTitle.textContent = "打开豆包当前对话后，这里列出你的提问。";
+  }
+  if (!exportPrompts.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "暂无提问。";
+    exportChatList.append(empty);
+    return;
+  }
+  exportPrompts.forEach((prompt, index) => {
+    const prev = exportPrompts[index - 1];
+    const gap = promptGapSec(prev, prompt);
+    if (gap >= PROMPT_GAP_WARN_SEC) {
+      const warn = document.createElement("p");
+      warn.className = "chat-gap-warn";
+      warn.textContent = `↑ 与上条相差 ${formatDurationSec(gap)}，中间可能还有未滚到的提问`;
+      exportChatList.append(warn);
+    }
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `chat-row${prompt.selected ? " is-selected" : ""}`;
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", String(prompt.selected));
+    const when = formatPromptTime(prompt.createTime);
+    row.title = when ? `${when}\n${prompt.question}` : prompt.question;
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.className = "chat-row-check";
+    check.checked = prompt.selected;
+    check.tabIndex = -1;
+    const body = document.createElement("span");
+    const title = document.createElement("span");
+    title.className = "chat-row-title";
+    title.textContent = `${prompt.index}. ${previewPrompt(prompt.question)}`;
+    const meta = document.createElement("span");
+    meta.className = "chat-row-meta";
+    const reply = prompt.answer
+      ? `已有回复 · ${prompt.answer.replace(/\s+/g, " ").trim().slice(0, 28)}`
+      : "暂无回复";
+    meta.textContent = when ? `${when} · ${reply}` : reply;
+    body.append(title, meta);
+    row.append(check, body);
+    row.addEventListener("click", (event) => {
+      applyExportSelection(index, event);
+    });
+    exportChatList.append(row);
+  });
+}
+
+function applyExportSelection(index: number, event: MouseEvent) {
+  const prompt = exportPrompts[index];
+  if (!prompt) return;
+  if (event.shiftKey && exportAnchorIndex >= 0) {
+    const from = Math.min(exportAnchorIndex, index);
+    const to = Math.max(exportAnchorIndex, index);
+    for (let i = from; i <= to; i++) exportPrompts[i]!.selected = true;
+  } else if (event.ctrlKey || event.metaKey) {
+    prompt.selected = !prompt.selected;
+    exportAnchorIndex = index;
+  } else {
+    const next = !prompt.selected;
+    for (const row of exportPrompts) row.selected = false;
+    prompt.selected = next;
+    exportAnchorIndex = index;
+  }
+  renderExportPrompts();
+  schedulePersistExportCache();
+}
+
+async function clearCurrentExportCache() {
+  const id = exportMeta?.conversationId;
+  const name = exportMeta?.name || "当前对话";
+  const count = exportPrompts.length;
+  if (!id) {
+    setExportStatus("没有可清空的当前对话缓存。", "err");
+    return;
+  }
+  if (
+    !window.confirm(
+      `确定清空「${name}」已累积的 ${count} 条提问？\n此操作不可恢复。`
+    )
+  ) {
+    return;
+  }
+  if (exportCacheTimer) {
+    clearTimeout(exportCacheTimer);
+    exportCacheTimer = null;
+  }
+  await persistExportCacheNow().catch(() => {});
+  const store = await readExportCacheStore();
+  delete store[id];
+  await writeExportCacheStore(store);
+  await clearPagePromptBag(id);
+  exportPrompts = [];
+  exportAnchorIndex = -1;
+  if (exportMeta) exportMeta = { ...exportMeta, hasMore: true };
+  exportWatchRevision = 0;
+  renderExportPrompts();
+  setExportStatus(`已清空「${name}」的提问缓存。`, "ok");
+}
+
+async function clearAllExportCache() {
+  const store = await readExportCacheStore();
+  const keys = Object.keys(store);
+  const currentCount = exportPrompts.length;
+  if (
+    !window.confirm(
+      `确定清空全部对话的提问缓存？\n当前已存 ${keys.length} 个会话` +
+        (currentCount ? `（含当前 ${currentCount} 条）` : "") +
+        `。\n此操作不可恢复。`
+    )
+  ) {
+    return;
+  }
+  if (exportCacheTimer) {
+    clearTimeout(exportCacheTimer);
+    exportCacheTimer = null;
+  }
+  await writeExportCacheStore({});
+  await clearPagePromptBag();
+  exportPrompts = [];
+  exportMeta = null;
+  exportAnchorIndex = -1;
+  exportWatchRevision = 0;
+  renderExportPrompts();
+  setExportStatus("已清空全部对话的提问缓存。", "ok");
+}
+
+async function scanExportPrompts(opts?: { reason?: "manual" | "follow" | "open" }) {
+  if (exportingChats) return;
+  const tabHint = await getActiveChatTab();
+  const requestChatId = tabHint?.url ? chatIdFromUrl(tabHint.url) : "";
+  if (scanningExport && exportScanForChatId && exportScanForChatId === requestChatId) return;
+
+  scanningExport = true;
+  exportScanForChatId = requestChatId || "";
+  if (requestChatId) exportFollowChatId = requestChatId;
+  scanChatsBtn.disabled = true;
+  if (opts?.reason !== "follow") {
+    setExportStatus("正在获取当前对话的提问…");
+  }
+  try {
+    const tab = await getActiveChatTab();
+    if (!tab?.id || !isDoubaoChatTab(tab.url) || !isSupportedChatUrl(tab.url!)) {
+      throw new Error("请先打开豆包对话页（www.doubao.com/chat/数字）。");
+    }
+    const liveId = chatIdFromUrl(tab.url!);
+    if (requestChatId && liveId && liveId !== requestChatId) return;
+    await ensureExportPromptWatch(tab.id);
+    const [injection] = await browser.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "MAIN",
+      func: async () => {
+        const api = (
+          window as unknown as {
+            __DOUBAO_HD__?: { refreshCurrentPrompts: () => Promise<PromptListResult> };
+          }
+        ).__DOUBAO_HD__;
+        if (!api?.refreshCurrentPrompts) throw new Error("请刷新豆包页面后重试。");
+        return api.refreshCurrentPrompts();
+      },
+    });
+    if (injection && "error" in injection && injection.error) throw new Error(String(injection.error));
+    const result = injection?.result as PromptListResult | undefined;
+    if (!result) throw new Error("未读到当前对话。");
+    const still = await getActiveChatTab();
+    const stillId = still?.url ? chatIdFromUrl(still.url) : "";
+    if (requestChatId && stillId && stillId !== requestChatId) return;
+    exportWatchRevision += 1;
+    await applyExportPromptResult(result);
+    const summary = exportTimeSummary(exportPrompts);
+    if (!exportPrompts.length) {
+      setExportStatus("当前对话暂无提问。可先滚动加载。", "err");
+    } else {
+      const prefix = opts?.reason === "follow" ? "已跟随会话 · " : "";
+      setExportStatus(
+        summary
+          ? `${prefix}${exportPrompts.length} 条 · ${summary}`
+          : `${prefix}已累积 ${exportPrompts.length} 条提问。`,
+        "ok"
+      );
+    }
+  } catch (error) {
+    // 跟随切换失败时保留已恢复的缓存，避免整页被清空
+    if (!exportPrompts.length) {
+      exportMeta = null;
+      renderExportPrompts();
+    }
+    setExportStatus(error instanceof Error ? error.message : String(error), "err");
+  } finally {
+    if (exportScanForChatId === (requestChatId || "")) {
+      scanningExport = false;
+      exportScanForChatId = "";
+    }
+    scanChatsBtn.disabled = false;
+  }
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportSelectedPrompts() {
+  if (exportingChats) return;
+  const selected = selectedExportPrompts();
+  if (!selected.length) {
+    setExportStatus("请先勾选至少一条提问。", "err");
+    return;
+  }
+  if (!exportMeta) {
+    setExportStatus("缺少会话信息，请先获取提问后再导出。", "err");
+    return;
+  }
+  exportingChats = true;
+  exportBtn.disabled = true;
+  scanChatsBtn.disabled = true;
+  try {
+    await persistExportCacheNow().catch(() => {});
+    // 直接用侧栏已累积/勾选的问答生成 Markdown，不再回页面按 ID 过滤。
+    const pack = exportPromptTurnsMarkdown(exportMeta, selected);
+    triggerDownload(
+      new Blob([pack.markdown], { type: "text/markdown;charset=utf-8" }),
+      `${pack.stem}.md`
+    );
+    setExportStatus(
+      `已导出 ${pack.selected.length} 条提问（${exportMeta.name || "当前对话"}）。`,
+      "ok"
+    );
+  } catch (error) {
+    setExportStatus(error instanceof Error ? error.message : String(error), "err");
+  } finally {
+    exportingChats = false;
+    scanChatsBtn.disabled = false;
+    refreshExportCount();
+  }
+}
+
+scanChatsBtn.addEventListener("click", () => {
+  void scanExportPrompts();
+});
+document.getElementById("export-select-all")!.addEventListener("click", () => {
+  if (!exportPrompts.length) return;
+  for (const row of exportPrompts) row.selected = true;
+  renderExportPrompts();
+  schedulePersistExportCache();
+});
+document.getElementById("export-select-none")!.addEventListener("click", () => {
+  if (!exportPrompts.length) return;
+  for (const row of exportPrompts) row.selected = false;
+  exportAnchorIndex = -1;
+  renderExportPrompts();
+  schedulePersistExportCache();
+});
+exportClearCurrentBtn.addEventListener("click", () => {
+  void clearCurrentExportCache();
+});
+exportClearAllBtn.addEventListener("click", () => {
+  void clearAllExportCache();
+});
+exportBtn.addEventListener("click", () => {
+  void exportSelectedPrompts();
+});
+renderExportPrompts();
+setExportStatus("打开豆包对话页后进入本页即可。");

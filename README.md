@@ -1,9 +1,10 @@
 # 豆包下载
 
-WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+Shift+I` / `Alt+Shift+U`** 或点工具栏图标，打开 **Chrome 右侧边栏**（不是小弹窗），做两件事：
+WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+Shift+I` / `Alt+Shift+U`** 或点工具栏图标，打开 **Chrome 右侧边栏**（不是小弹窗），做三件事：
 
 1. **图片下载**：只扫当前 `/chat/{id}` 会话的高清图，勾选并排好顺序后打成 ZIP。
 2. **内容发布**：编辑 `contents` / `reply_words` 和图片，点提交先写入本地队列，后台再上传 GitHub。关掉侧边栏也会继续。
+3. **聊天导出**：按当前会话累积用户提问与回复，勾选后导出为 Markdown；切换会话自动跟随获取，记录按会话本地持久化。
 
 顶部可勾选「大于 2MB 转为 JPEG」（品质 90%，透明底改白；转完没变小或失败则留原图）。下载、Console 脚本、GitHub 上传共用。GitHub 仓库 / Token 在设置页。
 
@@ -41,6 +42,20 @@ WXT 浏览器扩展。在 [豆包](https://www.doubao.com) 对话页用 **`Alt+S
 
 ---
 
+## 聊天导出
+
+侧边栏 Tab（设置左侧）：列出**当前对话**的用户提问，勾选后导出问答 Markdown。
+
+- **目之所及皆可保存**：滚动加载进页面的消息会自动入库（防抖）；按 `messageId` 去重、按时间排序。
+- **按会话持久化**：每个对话各自累积，存在本机；切换对话不丢另一边的记录。
+- **自动跟随**：在导出页时切换豆包会话，会自动恢复该会话缓存并再获取一轮（等同点「获取提问」），与下载 / 发布页的自动获取一致。
+- **勾选**：单击切换；`Ctrl` 多选；`Shift` 范围选择。也可全选 / 全不选。
+- **时间与缺口**：每条显示提问时间；相邻相差 ≥30 分钟会标出可能漏滚的缺口（虚拟列表滚太快时中间段可能未加载）。
+- **清空**：支持「清空当前」「清空全部」，均需二次确认。
+- **文件名**：`豆包-{id末段}-{对话名截断}-{条数}条.md`。
+
+---
+
 ## 安装
 
 ### 从 Release 安装（推荐）
@@ -69,11 +84,12 @@ npm run zip       # → .output/doubao-download-*-chrome.zip
 ## 架构
 
 ```
-侧边栏（下载 / 发布 / 设置）
+侧边栏（下载 / 发布 / 导出 / 设置）
   ├─ chrome.scripting.executeScript({ world: 'MAIN' })
   │     └─ doubao-main.js
-  │           ├─ extract-hd.ts     当前会话高清图
-  │           └─ zip-download.ts   并行 fetch + JPEG + JSZip（按列表顺序入包）
+  │           ├─ extract-hd.ts           当前会话高清图
+  │           ├─ extract-chat-export.ts  提问累积 / 导出 Markdown
+  │           └─ zip-download.ts         并行 fetch + JPEG + JSZip（按列表顺序入包）
   └─ background（IndexedDB 队列）
         ├─ 先缓存图片与 JSON/MD
         └─ 再写入 GitHub Contents API
@@ -88,6 +104,8 @@ npm run zip       # → .output/doubao-download-*-chrome.zip
 ## 常见问题
 
 **扫到 0 张？** 先点开大图预览，再打开侧边栏或点「获取图片」。
+
+**导出提问很少 / 有缺口？** 豆包是虚拟列表，未滚过的历史不会入库；放慢或来回补滚，看时间缺口提示。切换会话后再切回会从本地缓存恢复。
 
 **提示无法注入 / 没有权限？** 确认当前标签是 `https://www.doubao.com/...`，重新加载扩展后再试。
 

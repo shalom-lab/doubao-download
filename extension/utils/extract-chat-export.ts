@@ -514,11 +514,12 @@ function pairPrompts(messages: ChatMessage[]): PromptTurn[] {
   for (const a of assistants) {
     if (!a.replyId) continue;
     const prev = byReply.get(a.replyId);
-    // Prefer longer / later assistant reply for the same user question.
+    // Same question may have regenerations; prefer later, then longer.
     if (
       !prev ||
-      (a.createTime || 0) >= (prev.createTime || 0) ||
-      (a.text?.length || 0) > (prev.text?.length || 0)
+      (a.createTime || 0) > (prev.createTime || 0) ||
+      ((a.createTime || 0) === (prev.createTime || 0) &&
+        (a.text?.length || 0) > (prev.text?.length || 0))
     ) {
       byReply.set(a.replyId, a);
     }
@@ -526,21 +527,16 @@ function pairPrompts(messages: ChatMessage[]): PromptTurn[] {
 
   const users = messages.filter((m) => m.role === "user");
   return users.map((q, index) => {
+    // 只认 replyId → user.messageId 的明确匹配；缺回复就留空，禁止「下一条 assistant」错挂。
     const ans = byReply.get(q.messageId);
-    // Fallback: next assistant message after this user turn.
-    let fallback = ans;
-    if (!fallback) {
-      const qi = messages.findIndex((m) => m.messageId === q.messageId);
-      fallback = messages.slice(qi + 1).find((m) => m.role === "assistant");
-    }
     return {
       id: q.messageId,
       index: index + 1,
       question: q.text || "",
-      answer: fallback?.text || "",
+      answer: ans?.text || "",
       createTime: q.createTime,
       questionId: q.messageId,
-      answerId: fallback?.messageId,
+      answerId: ans?.messageId,
     };
   });
 }
@@ -826,18 +822,33 @@ export function exportPromptTurnsMarkdown(
   return { markdown, stem, selected };
 }
 
-/** 合并两份提问列表（按 id 去重，保留更完整正文，再按时间排序重编号）。 */
+/**
+ * 合并两份提问列表（按 id 去重，再按时间排序重编号）。
+ * 回复规则：只有明确 answerId 匹配才写入/更新正文；缺匹配留空。
+ * 新到的明确匹配整份覆盖（answerId + answer 一起换），不再按「更长」保留错挂正文。
+ */
 export function mergePromptTurns(base: PromptTurn[], incoming: PromptTurn[]): PromptTurn[] {
   const map = new Map<string, PromptTurn>();
   const prefer = (a: PromptTurn, b: PromptTurn): PromptTurn => {
     const question =
       (b.question?.length || 0) >= (a.question?.length || 0) ? b.question : a.question;
-    const answer =
-      (b.answer?.length || 0) >= (a.answer?.length || 0) ? b.answer : a.answer;
     const createTime =
       a.createTime && b.createTime
         ? Math.min(a.createTime, b.createTime)
         : a.createTime || b.createTime;
+
+    let answer = "";
+    let answerId: string | undefined;
+    if (b.answerId) {
+      // 本次收获已有明确匹配：整份采用（允许比缓存更短）
+      answer = b.answer || "";
+      answerId = b.answerId;
+    } else if (a.answerId) {
+      // 本次视口未带回回复：保留此前已确认的匹配
+      answer = a.answer || "";
+      answerId = a.answerId;
+    }
+
     return {
       ...a,
       ...b,
@@ -845,7 +856,7 @@ export function mergePromptTurns(base: PromptTurn[], incoming: PromptTurn[]): Pr
       answer,
       createTime,
       questionId: b.questionId || a.questionId,
-      answerId: b.answerId || a.answerId,
+      answerId,
     };
   };
   for (const p of base) {
